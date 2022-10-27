@@ -122,8 +122,7 @@ private:
 class CassandraFunctionalTest : public testing::Test {
 public:
   CassandraFunctionalTest() {
-    EXPECT_OK(
-        DestroyDB(kDbName, Options()));  // Start each test with a fresh DB
+    DestroyDB(kDbName, Options());    // Start each test with a fresh DB
   }
 
   std::shared_ptr<DB> OpenDb() {
@@ -423,7 +422,6 @@ TEST_F(CassandraFunctionalTest, LoadCompactionFilterFactory) {
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
-  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

@@ -60,10 +60,9 @@ public interface AdvancedMutableColumnFamilyOptionsInterface<
    * write_buffer_size * memtable_prefix_bloom_size_ratio.
    * If it is larger than 0.25, it is santinized to 0.25.
    *
-   * Default: 0 (disabled)
+   * Default: 0 (disable)
    *
-   * @param memtablePrefixBloomSizeRatio the ratio of memtable used by the
-   *     bloom filter, 0 means no bloom filter
+   * @param memtablePrefixBloomSizeRatio The ratio
    * @return the reference to the current options.
    */
   T setMemtablePrefixBloomSizeRatio(
@@ -75,55 +74,11 @@ public interface AdvancedMutableColumnFamilyOptionsInterface<
    * write_buffer_size * memtable_prefix_bloom_size_ratio.
    * If it is larger than 0.25, it is santinized to 0.25.
    *
-   * Default: 0 (disabled)
+   * Default: 0 (disable)
    *
-   * @return the ratio of memtable used by the bloom filter
+   * @return the ratio
    */
   double memtablePrefixBloomSizeRatio();
-
-  /**
-   * Threshold used in the MemPurge (memtable garbage collection)
-   * feature. A value of 0.0 corresponds to no MemPurge,
-   * a value of 1.0 will trigger a MemPurge as often as possible.
-   *
-   * Default: 0.0 (disabled)
-   *
-   * @param experimentalMempurgeThreshold the threshold used by
-   *     the MemPurge decider.
-   * @return the reference to the current options.
-   */
-  T setExperimentalMempurgeThreshold(double experimentalMempurgeThreshold);
-
-  /**
-   * Threshold used in the MemPurge (memtable garbage collection)
-   * feature. A value of 0.0 corresponds to no MemPurge,
-   * a value of 1.0 will trigger a MemPurge as often as possible.
-   *
-   * Default: 0 (disabled)
-   *
-   * @return the threshold used by the MemPurge decider
-   */
-  double experimentalMempurgeThreshold();
-
-  /**
-   * Enable whole key bloom filter in memtable. Note this will only take effect
-   * if memtable_prefix_bloom_size_ratio is not 0. Enabling whole key filtering
-   * can potentially reduce CPU usage for point-look-ups.
-   *
-   * Default: false (disabled)
-   *
-   * @param memtableWholeKeyFiltering true if whole key bloom filter is enabled
-   *     in memtable
-   * @return the reference to the current options.
-   */
-  T setMemtableWholeKeyFiltering(boolean memtableWholeKeyFiltering);
-
-  /**
-   * Returns whether whole key bloom filter is enabled in memtable
-   *
-   * @return true if whole key bloom filter is enabled in memtable
-   */
-  boolean memtableWholeKeyFiltering();
 
   /**
    * Page size for huge page TLB for bloom in memtable. If &le; 0, not allocate
@@ -591,7 +546,7 @@ public interface AdvancedMutableColumnFamilyOptionsInterface<
    * Dynamically changeable through
    * {@link RocksDB#setOptions(ColumnFamilyHandle, MutableColumnFamilyOptions)}.
    *
-   * @return true if blob files are enabled
+   * @return true iff blob files are enabled
    */
   boolean enableBlobFiles();
 
@@ -701,7 +656,7 @@ public interface AdvancedMutableColumnFamilyOptionsInterface<
    *
    * Default: false
    *
-   * @return true if blob garbage collection is currently enabled.
+   * @return true iff blob garbage collection is currently enabled.
    */
   boolean enableBlobGarbageCollection();
 
@@ -756,73 +711,6 @@ public interface AdvancedMutableColumnFamilyOptionsInterface<
    * @return the current threshold at which garbage collection of blobs is forced
    */
   double blobGarbageCollectionForceThreshold();
-
-  /**
-   * Set compaction readahead for blob files.
-   *
-   * Default: 0
-   *
-   * Dynamically changeable through
-   * {@link RocksDB#setOptions(ColumnFamilyHandle, MutableColumnFamilyOptions)}.
-   *
-   * @param blobCompactionReadaheadSize the compaction readahead for blob files
-   *
-   * @return the reference to the current options.
-   */
-  T setBlobCompactionReadaheadSize(final long blobCompactionReadaheadSize);
-
-  /**
-   * Get compaction readahead for blob files.
-   *
-   * @return the current compaction readahead for blob files
-   */
-  long blobCompactionReadaheadSize();
-
-  /**
-   * Set a certain LSM tree level to enable blob files.
-   *
-   * Default: 0
-   *
-   * Dynamically changeable through
-   * {@link RocksDB#setOptions(ColumnFamilyHandle, MutableColumnFamilyOptions)}.
-   *
-   * @param blobFileStartingLevel the starting level to enable blob files
-   *
-   * @return the reference to the current options.
-   */
-  T setBlobFileStartingLevel(final int blobFileStartingLevel);
-
-  /**
-   * Get the starting LSM tree level to enable blob files.
-   *
-   * Default: 0
-   *
-   * @return the current LSM tree level to enable blob files.
-   */
-  int blobFileStartingLevel();
-
-  /**
-   * Set a certain prepopulate blob cache option.
-   *
-   * Default: 0
-   *
-   * Dynamically changeable through
-   * {@link RocksDB#setOptions(ColumnFamilyHandle, MutableColumnFamilyOptions)}.
-   *
-   * @param prepopulateBlobCache the prepopulate blob cache option
-   *
-   * @return the reference to the current options.
-   */
-  T setPrepopulateBlobCache(final PrepopulateBlobCache prepopulateBlobCache);
-
-  /**
-   * Get the prepopulate blob cache option.
-   *
-   * Default: 0
-   *
-   * @return the current prepopulate blob cache option.
-   */
-  PrepopulateBlobCache prepopulateBlobCache();
 
   //
   // END options for blobs (integrated BlobDB)

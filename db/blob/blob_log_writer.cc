@@ -70,38 +70,32 @@ Status BlobLogWriter::AppendFooter(BlobLogFooter& footer,
   std::string str;
   footer.EncodeTo(&str);
 
-  Status s;
-  if (dest_->seen_error()) {
-    s.PermitUncheckedError();
-    return Status::IOError("Seen Error. Skip closing.");
-  } else {
-    s = dest_->Append(Slice(str));
-    if (s.ok()) {
-      block_offset_ += str.size();
+  Status s = dest_->Append(Slice(str));
+  if (s.ok()) {
+    block_offset_ += str.size();
 
-      s = Sync();
+    s = Sync();
+
+    if (s.ok()) {
+      s = dest_->Close();
 
       if (s.ok()) {
-        s = dest_->Close();
+        assert(!!checksum_method == !!checksum_value);
 
-        if (s.ok()) {
-          assert(!!checksum_method == !!checksum_value);
+        if (checksum_method) {
+          assert(checksum_method->empty());
 
-          if (checksum_method) {
-            assert(checksum_method->empty());
-
-            std::string method = dest_->GetFileChecksumFuncName();
-            if (method != kUnknownFileChecksumFuncName) {
-              *checksum_method = std::move(method);
-            }
+          std::string method = dest_->GetFileChecksumFuncName();
+          if (method != kUnknownFileChecksumFuncName) {
+            *checksum_method = std::move(method);
           }
-          if (checksum_value) {
-            assert(checksum_value->empty());
+        }
+        if (checksum_value) {
+          assert(checksum_value->empty());
 
-            std::string value = dest_->GetFileChecksum();
-            if (value != kUnknownFileChecksum) {
-              *checksum_value = std::move(value);
-            }
+          std::string value = dest_->GetFileChecksum();
+          if (value != kUnknownFileChecksum) {
+            *checksum_value = std::move(value);
           }
         }
       }

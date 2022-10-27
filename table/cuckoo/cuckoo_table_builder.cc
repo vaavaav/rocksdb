@@ -103,7 +103,7 @@ void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
   }
   if (ikey.type != kTypeDeletion && ikey.type != kTypeValue) {
     status_ = Status::NotSupported("Unsupported key type " +
-                                   std::to_string(ikey.type));
+                                   ToString(ikey.type));
     return;
   }
 

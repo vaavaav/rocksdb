@@ -340,9 +340,6 @@ TEST_F(EventListenerTest, OnSingleDBFlushTest) {
   for (int i = 1; i < 8; ++i) {
     ASSERT_OK(Flush(i));
     ASSERT_OK(dbfull()->TEST_WaitForFlushMemTable());
-    // Ensure background work is fully finished including listener callbacks
-    // before accessing listener state.
-    ASSERT_OK(dbfull()->TEST_WaitForBackgroundWork());
     ASSERT_EQ(listener->flushed_dbs_.size(), i);
     ASSERT_EQ(listener->flushed_column_family_names_.size(), i);
   }
@@ -381,27 +378,18 @@ TEST_F(EventListenerTest, MultiCF) {
     ASSERT_OK(Put(5, "nikitich", std::string(90000, 'n')));
     ASSERT_OK(Put(6, "alyosha", std::string(90000, 'a')));
     ASSERT_OK(Put(7, "popovich", std::string(90000, 'p')));
-
-    ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->EnableProcessing();
-
     for (int i = 1; i < 8; ++i) {
-      ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->LoadDependency(
-          {{"DBImpl::NotifyOnFlushCompleted::PostAllOnFlushCompleted",
-            "EventListenerTest.MultiCF:PreVerifyListener"}});
       ASSERT_OK(Flush(i));
-      TEST_SYNC_POINT("EventListenerTest.MultiCF:PreVerifyListener");
+      ASSERT_OK(dbfull()->TEST_WaitForFlushMemTable());
       ASSERT_EQ(listener->flushed_dbs_.size(), i);
       ASSERT_EQ(listener->flushed_column_family_names_.size(), i);
-      // make sure callback functions are called in the right order
-      if (i == 7) {
-        for (size_t j = 0; j < cf_names.size(); j++) {
-          ASSERT_EQ(listener->flushed_dbs_[j], db_);
-          ASSERT_EQ(listener->flushed_column_family_names_[j], cf_names[j]);
-        }
-      }
     }
 
-    ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->DisableProcessing();
+    // make sure callback functions are called in the right order
+    for (size_t i = 0; i < cf_names.size(); i++) {
+      ASSERT_EQ(listener->flushed_dbs_[i], db_);
+      ASSERT_EQ(listener->flushed_column_family_names_[i], cf_names[i]);
+    }
     Close();
   }
 }
@@ -436,10 +424,10 @@ TEST_F(EventListenerTest, MultiDBMultiListeners) {
   std::vector<std::vector<ColumnFamilyHandle *>> vec_handles;
 
   for (int d = 0; d < kNumDBs; ++d) {
-    ASSERT_OK(DestroyDB(dbname_ + std::to_string(d), options));
+    ASSERT_OK(DestroyDB(dbname_ + ToString(d), options));
     DB* db;
     std::vector<ColumnFamilyHandle*> handles;
-    ASSERT_OK(DB::Open(options, dbname_ + std::to_string(d), &db));
+    ASSERT_OK(DB::Open(options, dbname_ + ToString(d), &db));
     for (size_t c = 0; c < cf_names.size(); ++c) {
       ColumnFamilyHandle* handle;
       ASSERT_OK(db->CreateColumnFamily(cf_opts, cf_names[c], &handle));
@@ -463,13 +451,6 @@ TEST_F(EventListenerTest, MultiDBMultiListeners) {
       ASSERT_OK(
           static_cast_with_check<DBImpl>(dbs[d])->TEST_WaitForFlushMemTable());
     }
-  }
-
-  for (int d = 0; d < kNumDBs; ++d) {
-    // Ensure background work is fully finished including listener callbacks
-    // before accessing listener state.
-    ASSERT_OK(
-        static_cast_with_check<DBImpl>(dbs[d])->TEST_WaitForBackgroundWork());
   }
 
   for (auto* listener : listeners) {
@@ -527,17 +508,16 @@ TEST_F(EventListenerTest, DisableBGCompaction) {
   // keep writing until writes are forced to stop.
   for (int i = 0; static_cast<int>(cf_meta.file_count) < kSlowdownTrigger * 10;
        ++i) {
-    ASSERT_OK(
-        Put(1, std::to_string(i), std::string(10000, 'x'), WriteOptions()));
+    ASSERT_OK(Put(1, ToString(i), std::string(10000, 'x'), WriteOptions()));
     FlushOptions fo;
     fo.allow_write_stall = true;
     ASSERT_OK(db_->Flush(fo, handles_[1]));
     db_->GetColumnFamilyMetaData(handles_[1], &cf_meta);
   }
-  // Ensure background work is fully finished including listener callbacks
-  // before accessing listener state.
-  ASSERT_OK(dbfull()->TEST_WaitForBackgroundWork());
   ASSERT_GE(listener->slowdown_count, kSlowdownTrigger * 9);
+  // We don't want the listener executing during DBTestBase::Close() due to
+  // race on handles_.
+  ASSERT_OK(dbfull()->TEST_WaitForBackgroundWork());
 }
 
 class TestCompactionReasonListener : public EventListener {
@@ -792,13 +772,11 @@ class TableFileCreationListener : public EventListener {
     ASSERT_EQ(info.file_checksum, kUnknownFileChecksum);
     ASSERT_EQ(info.file_checksum_func_name, kUnknownFileChecksumFuncName);
     if (info.status.ok()) {
-      if (info.table_properties.num_range_deletions == 0U) {
-        ASSERT_GT(info.table_properties.data_size, 0U);
-        ASSERT_GT(info.table_properties.raw_key_size, 0U);
-        ASSERT_GT(info.table_properties.raw_value_size, 0U);
-        ASSERT_GT(info.table_properties.num_data_blocks, 0U);
-        ASSERT_GT(info.table_properties.num_entries, 0U);
-      }
+      ASSERT_GT(info.table_properties.data_size, 0U);
+      ASSERT_GT(info.table_properties.raw_key_size, 0U);
+      ASSERT_GT(info.table_properties.raw_value_size, 0U);
+      ASSERT_GT(info.table_properties.num_data_blocks, 0U);
+      ASSERT_GT(info.table_properties.num_entries, 0U);
     } else {
       if (idx >= 0) {
         failure_[idx]++;
@@ -850,6 +828,14 @@ TEST_F(EventListenerTest, TableFileCreationListenersTest) {
   ASSERT_OK(dbfull()->TEST_WaitForCompact());
   listener->CheckAndResetCounters(0, 0, 0, 1, 1, 0);
 
+  // Verify that an empty table file that is immediately deleted gives Aborted
+  // status to listener.
+  ASSERT_OK(Put("baz", "z"));
+  ASSERT_OK(SingleDelete("baz"));
+  ASSERT_OK(Flush());
+  listener->CheckAndResetCounters(1, 1, 1, 0, 0, 0);
+  ASSERT_TRUE(listener->last_failure_.IsAborted());
+
   ASSERT_OK(Put("foo", "aaa3"));
   ASSERT_OK(Put("bar", "bbb3"));
   ASSERT_OK(Flush());
@@ -859,31 +845,7 @@ TEST_F(EventListenerTest, TableFileCreationListenersTest) {
   ASSERT_NOK(dbfull()->TEST_WaitForCompact());
   listener->CheckAndResetCounters(1, 1, 0, 1, 1, 1);
   ASSERT_TRUE(listener->last_failure_.IsNotSupported());
-
-  // Reset
-  test_env->SetStatus(Status::OK());
-  DestroyAndReopen(options);
-
-  // Verify that an empty table file that is immediately deleted gives Aborted
-  // status to listener.
-  ASSERT_OK(Put("baz", "z"));
-  ASSERT_OK(SingleDelete("baz"));
-  ASSERT_OK(Flush());
-  listener->CheckAndResetCounters(1, 1, 1, 0, 0, 0);
-  ASSERT_TRUE(listener->last_failure_.IsAborted());
-
-  // Also in compaction
-  ASSERT_OK(Put("baz", "z"));
-  ASSERT_OK(Flush());
-  ASSERT_OK(db_->DeleteRange(WriteOptions(), db_->DefaultColumnFamily(),
-                             kRangeStart, kRangeEnd));
-  ASSERT_OK(Flush());
-  ASSERT_OK(db_->CompactRange(CompactRangeOptions(), nullptr, nullptr));
-  ASSERT_OK(dbfull()->TEST_WaitForCompact());
-  listener->CheckAndResetCounters(2, 2, 0, 1, 1, 1);
-  ASSERT_TRUE(listener->last_failure_.IsAborted());
-
-  Close();  // Avoid UAF on listener
+  Close();
 }
 
 class MemTableSealedListener : public EventListener {
@@ -1276,7 +1238,22 @@ class BlobDBJobLevelEventListenerTest : public EventListener {
   explicit BlobDBJobLevelEventListenerTest(EventListenerTest* test)
       : test_(test), call_count_(0) {}
 
-  const VersionStorageInfo* GetVersionStorageInfo() const {
+  std::shared_ptr<BlobFileMetaData> GetBlobFileMetaData(
+      const VersionStorageInfo::BlobFiles& blob_files,
+      uint64_t blob_file_number) {
+    const auto it = blob_files.find(blob_file_number);
+
+    if (it == blob_files.end()) {
+      return nullptr;
+    }
+
+    const auto& meta = it->second;
+    assert(meta);
+
+    return meta;
+  }
+
+  const VersionStorageInfo::BlobFiles& GetBlobFiles() {
     VersionSet* const versions = test_->dbfull()->GetVersionSet();
     assert(versions);
 
@@ -1289,28 +1266,8 @@ class BlobDBJobLevelEventListenerTest : public EventListener {
     const VersionStorageInfo* const storage_info = current->storage_info();
     EXPECT_NE(storage_info, nullptr);
 
-    return storage_info;
-  }
-
-  void CheckBlobFileAdditions(
-      const std::vector<BlobFileAdditionInfo>& blob_file_addition_infos) const {
-    const auto* vstorage = GetVersionStorageInfo();
-
-    EXPECT_FALSE(blob_file_addition_infos.empty());
-
-    for (const auto& blob_file_addition_info : blob_file_addition_infos) {
-      const auto meta = vstorage->GetBlobFileMetaData(
-          blob_file_addition_info.blob_file_number);
-
-      EXPECT_NE(meta, nullptr);
-      EXPECT_EQ(meta->GetBlobFileNumber(),
-                blob_file_addition_info.blob_file_number);
-      EXPECT_EQ(meta->GetTotalBlobBytes(),
-                blob_file_addition_info.total_blob_bytes);
-      EXPECT_EQ(meta->GetTotalBlobCount(),
-                blob_file_addition_info.total_blob_count);
-      EXPECT_FALSE(blob_file_addition_info.blob_file_path.empty());
-    }
+    const auto& blob_files = storage_info->GetBlobFiles();
+    return blob_files;
   }
 
   std::vector<std::string> GetFlushedFiles() {
@@ -1324,28 +1281,46 @@ class BlobDBJobLevelEventListenerTest : public EventListener {
 
   void OnFlushCompleted(DB* /*db*/, const FlushJobInfo& info) override {
     call_count_++;
-
+    EXPECT_FALSE(info.blob_file_addition_infos.empty());
+    const auto& blob_files = GetBlobFiles();
     {
       std::lock_guard<std::mutex> lock(mutex_);
       flushed_files_.push_back(info.file_path);
     }
-
     EXPECT_EQ(info.blob_compression_type, kNoCompression);
 
-    CheckBlobFileAdditions(info.blob_file_addition_infos);
+    for (const auto& blob_file_addition_info : info.blob_file_addition_infos) {
+      const auto meta = GetBlobFileMetaData(
+          blob_files, blob_file_addition_info.blob_file_number);
+      EXPECT_EQ(meta->GetBlobFileNumber(),
+                blob_file_addition_info.blob_file_number);
+      EXPECT_EQ(meta->GetTotalBlobBytes(),
+                blob_file_addition_info.total_blob_bytes);
+      EXPECT_EQ(meta->GetTotalBlobCount(),
+                blob_file_addition_info.total_blob_count);
+      EXPECT_FALSE(blob_file_addition_info.blob_file_path.empty());
+    }
   }
 
-  void OnCompactionCompleted(DB* /*db*/,
-                             const CompactionJobInfo& info) override {
+  void OnCompactionCompleted(DB* /*db*/, const CompactionJobInfo& ci) override {
     call_count_++;
+    EXPECT_FALSE(ci.blob_file_garbage_infos.empty());
+    const auto& blob_files = GetBlobFiles();
+    EXPECT_EQ(ci.blob_compression_type, kNoCompression);
 
-    EXPECT_EQ(info.blob_compression_type, kNoCompression);
+    for (const auto& blob_file_addition_info : ci.blob_file_addition_infos) {
+      const auto meta = GetBlobFileMetaData(
+          blob_files, blob_file_addition_info.blob_file_number);
+      EXPECT_EQ(meta->GetBlobFileNumber(),
+                blob_file_addition_info.blob_file_number);
+      EXPECT_EQ(meta->GetTotalBlobBytes(),
+                blob_file_addition_info.total_blob_bytes);
+      EXPECT_EQ(meta->GetTotalBlobCount(),
+                blob_file_addition_info.total_blob_count);
+      EXPECT_FALSE(blob_file_addition_info.blob_file_path.empty());
+    }
 
-    CheckBlobFileAdditions(info.blob_file_addition_infos);
-
-    EXPECT_FALSE(info.blob_file_garbage_infos.empty());
-
-    for (const auto& blob_file_garbage_info : info.blob_file_garbage_infos) {
+    for (const auto& blob_file_garbage_info : ci.blob_file_garbage_infos) {
       EXPECT_GT(blob_file_garbage_info.blob_file_number, 0U);
       EXPECT_GT(blob_file_garbage_info.garbage_blob_count, 0U);
       EXPECT_GT(blob_file_garbage_info.garbage_blob_bytes, 0U);
@@ -1591,7 +1566,6 @@ TEST_F(EventListenerTest, BlobDBFileTest) {
 #endif  // ROCKSDB_LITE
 
 int main(int argc, char** argv) {
-  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

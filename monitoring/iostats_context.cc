@@ -13,8 +13,11 @@ namespace ROCKSDB_NAMESPACE {
 // Should not be used because the counters are not thread-safe.
 // Put here just to make get_iostats_context() simple without ifdef.
 static IOStatsContext iostats_context;
+#elif defined(ROCKSDB_SUPPORT_THREAD_LOCAL)
+__thread IOStatsContext iostats_context;
 #else
-thread_local IOStatsContext iostats_context;
+#error \
+    "No thread-local support. Disable iostats context with -DNIOSTATS_CONTEXT."
 #endif
 
 IOStatsContext* get_iostats_context() {

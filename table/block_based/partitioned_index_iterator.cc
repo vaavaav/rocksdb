@@ -89,17 +89,16 @@ void PartitionedIndexIterator::InitPartitionedIndexBlock() {
     //   Enabled after 2 sequential IOs when ReadOptions.readahead_size == 0.
     // Explicit user requested readahead:
     //   Enabled from the very first IO when ReadOptions.readahead_size is set.
-    block_prefetcher_.PrefetchIfNeeded(
-        rep, partitioned_index_handle, read_options_.readahead_size,
-        is_for_compaction, /*no_sequential_checking=*/false,
-        read_options_.rate_limiter_priority);
+    block_prefetcher_.PrefetchIfNeeded(rep, partitioned_index_handle,
+                                       read_options_.readahead_size,
+                                       is_for_compaction);
     Status s;
     table_->NewDataBlockIterator<IndexBlockIter>(
         read_options_, partitioned_index_handle, &block_iter_,
         BlockType::kIndex,
-        /*get_context=*/nullptr, &lookup_context_,
+        /*get_context=*/nullptr, &lookup_context_, s,
         block_prefetcher_.prefetch_buffer(),
-        /*for_compaction=*/is_for_compaction, /*async_read=*/false, s);
+        /*for_compaction=*/is_for_compaction);
     block_iter_points_to_real_block_ = true;
     // We could check upper bound here but it is complicated to reason about
     // upper bound in index iterator. On the other than, in large scans, index

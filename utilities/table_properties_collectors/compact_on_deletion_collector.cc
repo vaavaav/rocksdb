@@ -115,7 +115,7 @@ static std::unordered_map<std::string, OptionTypeInfo>
              std::string* value) {
             const auto* factory =
                 static_cast<const CompactOnDeletionCollectorFactory*>(addr);
-            *value = std::to_string(factory->GetWindowSize());
+            *value = ToString(factory->GetWindowSize());
             return Status::OK();
           },
           nullptr}},
@@ -133,7 +133,7 @@ static std::unordered_map<std::string, OptionTypeInfo>
              std::string* value) {
             const auto* factory =
                 static_cast<const CompactOnDeletionCollectorFactory*>(addr);
-            *value = std::to_string(factory->GetDeletionTrigger());
+            *value = ToString(factory->GetDeletionTrigger());
             return Status::OK();
           },
           nullptr}},
@@ -151,7 +151,7 @@ static std::unordered_map<std::string, OptionTypeInfo>
              std::string* value) {
             const auto* factory =
                 static_cast<const CompactOnDeletionCollectorFactory*>(addr);
-            *value = std::to_string(factory->GetDeletionRatio());
+            *value = ToString(factory->GetDeletionRatio());
             return Status::OK();
           },
           nullptr}},

@@ -20,24 +20,17 @@ namespace ROCKSDB_NAMESPACE {
 // use_fsync maps to options.use_fsync, which determines the way that
 // the file is synced after copying.
 extern IOStatus CopyFile(FileSystem* fs, const std::string& source,
-                         std::unique_ptr<WritableFileWriter>& dest_writer,
-                         uint64_t size, bool use_fsync,
-                         const std::shared_ptr<IOTracer>& io_tracer,
-                         const Temperature temperature);
-extern IOStatus CopyFile(FileSystem* fs, const std::string& source,
                          const std::string& destination, uint64_t size,
                          bool use_fsync,
-                         const std::shared_ptr<IOTracer>& io_tracer,
-                         const Temperature temperature);
+                         const std::shared_ptr<IOTracer>& io_tracer = nullptr);
 inline IOStatus CopyFile(const std::shared_ptr<FileSystem>& fs,
                          const std::string& source,
                          const std::string& destination, uint64_t size,
                          bool use_fsync,
-                         const std::shared_ptr<IOTracer>& io_tracer,
-                         const Temperature temperature) {
-  return CopyFile(fs.get(), source, destination, size, use_fsync, io_tracer,
-                  temperature);
+                         const std::shared_ptr<IOTracer>& io_tracer = nullptr) {
+  return CopyFile(fs.get(), source, destination, size, use_fsync, io_tracer);
 }
+
 extern IOStatus CreateFile(FileSystem* fs, const std::string& destination,
                            const std::string& contents, bool use_fsync);
 
@@ -58,8 +51,20 @@ extern IOStatus GenerateOneFileChecksum(
     const std::string& requested_checksum_func_name, std::string* file_checksum,
     std::string* file_checksum_func_name,
     size_t verify_checksums_readahead_size, bool allow_mmap_reads,
-    std::shared_ptr<IOTracer>& io_tracer, RateLimiter* rate_limiter,
-    Env::IOPriority rate_limiter_priority);
+    std::shared_ptr<IOTracer>& io_tracer, RateLimiter* rate_limiter = nullptr);
+
+inline IOStatus GenerateOneFileChecksum(
+    const std::shared_ptr<FileSystem>& fs, const std::string& file_path,
+    FileChecksumGenFactory* checksum_factory,
+    const std::string& requested_checksum_func_name, std::string* file_checksum,
+    std::string* file_checksum_func_name,
+    size_t verify_checksums_readahead_size, bool allow_mmap_reads,
+    std::shared_ptr<IOTracer>& io_tracer) {
+  return GenerateOneFileChecksum(
+      fs.get(), file_path, checksum_factory, requested_checksum_func_name,
+      file_checksum, file_checksum_func_name, verify_checksums_readahead_size,
+      allow_mmap_reads, io_tracer);
+}
 
 inline IOStatus PrepareIOFromReadOptions(const ReadOptions& ro,
                                          SystemClock* clock, IOOptions& opts) {
@@ -78,8 +83,6 @@ inline IOStatus PrepareIOFromReadOptions(const ReadOptions& ro,
       (!opts.timeout.count() || ro.io_timeout < opts.timeout)) {
     opts.timeout = ro.io_timeout;
   }
-
-  opts.rate_limiter_priority = ro.rate_limiter_priority;
   return IOStatus::OK();
 }
 

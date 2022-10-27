@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "db/dbformat.h"
-#include "rocksdb/comparator.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/slice.h"
 #include "table/internal_iterator.h"
@@ -17,7 +16,7 @@ namespace ROCKSDB_NAMESPACE {
 class VectorIterator : public InternalIterator {
  public:
   VectorIterator(std::vector<std::string> keys, std::vector<std::string> values,
-                 const CompareInterface* icmp = nullptr)
+                 const Comparator* icmp = nullptr)
       : keys_(std::move(keys)),
         values_(std::move(values)),
         current_(keys_.size()),
@@ -91,7 +90,7 @@ class VectorIterator : public InternalIterator {
 
  private:
   struct IndexedKeyComparator {
-    IndexedKeyComparator(const CompareInterface* c,
+    IndexedKeyComparator(const Comparator* c,
                          const std::vector<std::string>* ks)
         : cmp(c), keys(ks) {}
 
@@ -107,7 +106,7 @@ class VectorIterator : public InternalIterator {
       return cmp->Compare(a, (*keys)[b]) < 0;
     }
 
-    const CompareInterface* cmp;
+    const Comparator* cmp;
     const std::vector<std::string>* keys;
   };
 

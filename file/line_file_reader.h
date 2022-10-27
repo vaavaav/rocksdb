@@ -32,7 +32,7 @@ class LineFileReader {
   static IOStatus Create(const std::shared_ptr<FileSystem>& fs,
                          const std::string& fname, const FileOptions& file_opts,
                          std::unique_ptr<LineFileReader>* reader,
-                         IODebugContext* dbg, RateLimiter* rate_limiter);
+                         IODebugContext* dbg);
 
   LineFileReader(const LineFileReader&) = delete;
   LineFileReader& operator=(const LineFileReader&) = delete;
@@ -41,8 +41,7 @@ class LineFileReader {
   // the line to `out`, without delimiter, or returning false on failure. You
   // must check GetStatus() to determine whether the failure was just
   // end-of-file (OK status) or an I/O error (another status).
-  // The internal rate limiter will be charged at the specified priority.
-  bool ReadLine(std::string* out, Env::IOPriority rate_limiter_priority);
+  bool ReadLine(std::string* out);
 
   // Returns the number of the line most recently returned from ReadLine.
   // Return value is unspecified if ReadLine has returned false due to

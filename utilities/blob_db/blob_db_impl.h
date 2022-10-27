@@ -128,7 +128,6 @@ class BlobDBImpl : public BlobDB {
       const std::vector<Slice>& keys,
       std::vector<std::string>* values) override;
 
-  using BlobDB::Write;
   virtual Status Write(const WriteOptions& opts, WriteBatch* updates) override;
 
   virtual Status Close() override;

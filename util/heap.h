@@ -101,9 +101,7 @@ class BinaryHeap {
 
   size_t size() const { return data_.size(); }
 
-  void reset_root_cmp_cache() {
-    root_cmp_cache_ = std::numeric_limits<size_t>::max();
-  }
+  void reset_root_cmp_cache() { root_cmp_cache_ = port::kMaxSizet; }
 
  private:
   static inline size_t get_root() { return 0; }
@@ -128,7 +126,7 @@ class BinaryHeap {
   void downheap(size_t index) {
     T v = std::move(data_[index]);
 
-    size_t picked_child = std::numeric_limits<size_t>::max();
+    size_t picked_child = port::kMaxSizet;
     while (1) {
       const size_t left_child = get_left(index);
       if (get_left(index) >= data_.size()) {
@@ -167,7 +165,7 @@ class BinaryHeap {
   Compare cmp_;
   autovector<T> data_;
   // Used to reduce number of cmp_ calls in downheap()
-  size_t root_cmp_cache_ = std::numeric_limits<size_t>::max();
+  size_t root_cmp_cache_ = port::kMaxSizet;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

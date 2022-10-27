@@ -37,8 +37,7 @@ class WalManagerTest : public testing::Test {
         table_cache_(NewLRUCache(50000, 16)),
         write_buffer_manager_(db_options_.db_write_buffer_size),
         current_log_number_(0) {
-    env_.reset(MockEnv::Create(Env::Default()));
-    EXPECT_OK(DestroyDB(dbname_, Options()));
+    env_.reset(MockEnv::Create(Env::Default())), DestroyDB(dbname_, Options());
   }
 
   void Init() {
@@ -55,7 +54,7 @@ class WalManagerTest : public testing::Test {
         new VersionSet(dbname_, &db_options_, env_options_, table_cache_.get(),
                        &write_buffer_manager_, &write_controller_,
                        /*block_cache_tracer=*/nullptr, /*io_tracer=*/nullptr,
-                       /*db_id*/ "", /*db_session_id*/ ""));
+                       /*db_session_id*/ ""));
 
     wal_manager_.reset(
         new WalManager(db_options_, env_options_, nullptr /*IOTracer*/));
@@ -95,7 +94,7 @@ class WalManagerTest : public testing::Test {
     for (int i = 1; i <= num_logs; ++i) {
       RollTheLog(true);
       for (int k = 0; k < entries_per_log; ++k) {
-        Put(std::to_string(k), std::string(1024, 'a'));
+        Put(ToString(k), std::string(1024, 'a'));
       }
     }
   }
@@ -329,7 +328,6 @@ TEST_F(WalManagerTest, TransactionLogIteratorNewFileWhileScanning) {
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
-  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

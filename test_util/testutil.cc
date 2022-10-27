@@ -118,6 +118,59 @@ class Uint64ComparatorImpl : public Comparator {
 
   void FindShortSuccessor(std::string* /*key*/) const override { return; }
 };
+
+// A test implementation of comparator with 64-bit integer timestamp.
+class ComparatorWithU64TsImpl : public Comparator {
+ public:
+  ComparatorWithU64TsImpl()
+      : Comparator(/*ts_sz=*/sizeof(uint64_t)),
+        cmp_without_ts_(BytewiseComparator()) {
+    assert(cmp_without_ts_);
+    assert(cmp_without_ts_->timestamp_size() == 0);
+  }
+  const char* Name() const override { return "ComparatorWithU64Ts"; }
+  void FindShortSuccessor(std::string*) const override {}
+  void FindShortestSeparator(std::string*, const Slice&) const override {}
+  int Compare(const Slice& a, const Slice& b) const override {
+    int ret = CompareWithoutTimestamp(a, b);
+    size_t ts_sz = timestamp_size();
+    if (ret != 0) {
+      return ret;
+    }
+    // Compare timestamp.
+    // For the same user key with different timestamps, larger (newer) timestamp
+    // comes first.
+    return -CompareTimestamp(ExtractTimestampFromUserKey(a, ts_sz),
+                             ExtractTimestampFromUserKey(b, ts_sz));
+  }
+  using Comparator::CompareWithoutTimestamp;
+  int CompareWithoutTimestamp(const Slice& a, bool a_has_ts, const Slice& b,
+                              bool b_has_ts) const override {
+    const size_t ts_sz = timestamp_size();
+    assert(!a_has_ts || a.size() >= ts_sz);
+    assert(!b_has_ts || b.size() >= ts_sz);
+    Slice lhs = a_has_ts ? StripTimestampFromUserKey(a, ts_sz) : a;
+    Slice rhs = b_has_ts ? StripTimestampFromUserKey(b, ts_sz) : b;
+    return cmp_without_ts_->Compare(lhs, rhs);
+  }
+  int CompareTimestamp(const Slice& ts1, const Slice& ts2) const override {
+    assert(ts1.size() == sizeof(uint64_t));
+    assert(ts2.size() == sizeof(uint64_t));
+    uint64_t lhs = DecodeFixed64(ts1.data());
+    uint64_t rhs = DecodeFixed64(ts2.data());
+    if (lhs < rhs) {
+      return -1;
+    } else if (lhs > rhs) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+ private:
+  const Comparator* cmp_without_ts_{nullptr};
+};
+
 }  // namespace
 
 const Comparator* Uint64Comparator() {
@@ -125,13 +178,9 @@ const Comparator* Uint64Comparator() {
   return &uint64comp;
 }
 
-const Comparator* BytewiseComparatorWithU64TsWrapper() {
-  ConfigOptions config_options;
-  const Comparator* user_comparator = nullptr;
-  Status s = Comparator::CreateFromString(
-      config_options, "leveldb.BytewiseComparator.u64ts", &user_comparator);
-  s.PermitUncheckedError();
-  return user_comparator;
+const Comparator* ComparatorWithU64Ts() {
+  static ComparatorWithU64TsImpl comp_with_u64_ts;
+  return &comp_with_u64_ts;
 }
 
 void CorruptKeyType(InternalKey* ikey) {
@@ -231,6 +280,7 @@ BlockBasedTableOptions RandomBlockBasedTableOptions(Random* rnd) {
        IndexType::kTwoLevelIndexSearch, IndexType::kBinarySearchWithFirstKey}};
   opt.index_type =
       index_types[rnd->Uniform(static_cast<int>(index_types.size()))];
+  opt.hash_index_allow_collision = rnd->Uniform(2);
   opt.checksum = static_cast<ChecksumType>(rnd->Uniform(3));
   opt.block_size = rnd->Uniform(10000000);
   opt.block_size_deviation = rnd->Uniform(100);
@@ -285,7 +335,7 @@ void RandomInitDBOptions(DBOptions* db_opt, Random* rnd) {
   db_opt->is_fd_close_on_exec = rnd->Uniform(2);
   db_opt->paranoid_checks = rnd->Uniform(2);
   db_opt->track_and_verify_wals_in_manifest = rnd->Uniform(2);
-  db_opt->verify_sst_unique_id_in_manifest = rnd->Uniform(2);
+  db_opt->skip_log_error_on_recovery = rnd->Uniform(2);
   db_opt->skip_stats_update_on_db_open = rnd->Uniform(2);
   db_opt->skip_checking_sst_file_sizes_on_db_open = rnd->Uniform(2);
   db_opt->use_adaptive_mutex = rnd->Uniform(2);
@@ -293,7 +343,6 @@ void RandomInitDBOptions(DBOptions* db_opt, Random* rnd) {
   db_opt->recycle_log_file_num = rnd->Uniform(2);
   db_opt->avoid_flush_during_recovery = rnd->Uniform(2);
   db_opt->avoid_flush_during_shutdown = rnd->Uniform(2);
-  db_opt->enforce_single_del_contracts = rnd->Uniform(2);
 
   // int options
   db_opt->max_background_compactions = rnd->Uniform(100);
@@ -342,6 +391,7 @@ void RandomInitCFOptions(ColumnFamilyOptions* cf_opt, DBOptions& db_options,
   cf_opt->level_compaction_dynamic_level_bytes = rnd->Uniform(2);
   cf_opt->optimize_filters_for_hits = rnd->Uniform(2);
   cf_opt->paranoid_file_checks = rnd->Uniform(2);
+  cf_opt->purge_redundant_kvs_while_flush = rnd->Uniform(2);
   cf_opt->force_consistency_checks = rnd->Uniform(2);
   cf_opt->compaction_options_fifo.allow_compaction = rnd->Uniform(2);
   cf_opt->memtable_whole_key_filtering = rnd->Uniform(2);
@@ -349,6 +399,8 @@ void RandomInitCFOptions(ColumnFamilyOptions* cf_opt, DBOptions& db_options,
   cf_opt->enable_blob_garbage_collection = rnd->Uniform(2);
 
   // double options
+  cf_opt->hard_rate_limit = static_cast<double>(rnd->Uniform(10000)) / 13;
+  cf_opt->soft_rate_limit = static_cast<double>(rnd->Uniform(10000)) / 13;
   cf_opt->memtable_prefix_bloom_size_ratio =
       static_cast<double>(rnd->Uniform(10000)) / 20000.0;
   cf_opt->blob_garbage_collection_age_cutoff = rnd->Uniform(10000) / 10000.0;
@@ -360,6 +412,7 @@ void RandomInitCFOptions(ColumnFamilyOptions* cf_opt, DBOptions& db_options,
   cf_opt->level0_slowdown_writes_trigger = rnd->Uniform(100);
   cf_opt->level0_stop_writes_trigger = rnd->Uniform(100);
   cf_opt->max_bytes_for_level_multiplier = rnd->Uniform(100);
+  cf_opt->max_mem_compaction_level = rnd->Uniform(100);
   cf_opt->max_write_buffer_number = rnd->Uniform(100);
   cf_opt->max_write_buffer_number_to_maintain = rnd->Uniform(100);
   cf_opt->max_write_buffer_size_to_maintain = rnd->Uniform(10000);
@@ -399,6 +452,9 @@ void RandomInitCFOptions(ColumnFamilyOptions* cf_opt, DBOptions& db_options,
   cf_opt->min_blob_size = uint_max + rnd->Uniform(10000);
   cf_opt->blob_file_size = uint_max + rnd->Uniform(10000);
   cf_opt->blob_compaction_readahead_size = uint_max + rnd->Uniform(10000);
+
+  // unsigned int options
+  cf_opt->rate_limit_delay_max_milliseconds = rnd->Uniform(10000);
 
   // pointer typed options
   cf_opt->prefix_extractor.reset(RandomSliceTransform(rnd));
@@ -658,7 +714,7 @@ class SpecialSkipListFactory : public MemTableRepFactory {
   std::string GetId() const override {
     std::string id = Name();
     if (num_entries_flush_ > 0) {
-      id.append(":").append(std::to_string(num_entries_flush_));
+      id.append(":").append(ROCKSDB_NAMESPACE::ToString(num_entries_flush_));
     }
     return id;
   }

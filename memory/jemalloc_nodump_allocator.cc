@@ -114,18 +114,19 @@ Status JemallocNodumpAllocator::InitializeArenas() {
       mallctl("arenas.create", &arena_index_, &arena_index_size, nullptr, 0);
   if (ret != 0) {
     return Status::Incomplete("Failed to create jemalloc arena, error code: " +
-                              std::to_string(ret));
+                              ROCKSDB_NAMESPACE::ToString(ret));
   }
   assert(arena_index_ != 0);
 
   // Read existing hooks.
-  std::string key = "arena." + std::to_string(arena_index_) + ".extent_hooks";
+  std::string key =
+      "arena." + ROCKSDB_NAMESPACE::ToString(arena_index_) + ".extent_hooks";
   extent_hooks_t* hooks;
   size_t hooks_size = sizeof(hooks);
   ret = mallctl(key.c_str(), &hooks, &hooks_size, nullptr, 0);
   if (ret != 0) {
     return Status::Incomplete("Failed to read existing hooks, error code: " +
-                              std::to_string(ret));
+                              ROCKSDB_NAMESPACE::ToString(ret));
   }
 
   // Store existing alloc.
@@ -145,7 +146,7 @@ Status JemallocNodumpAllocator::InitializeArenas() {
   ret = mallctl(key.c_str(), nullptr, nullptr, &hooks_ptr, sizeof(hooks_ptr));
   if (ret != 0) {
     return Status::Incomplete("Failed to set custom hook, error code: " +
-                              std::to_string(ret));
+                              ROCKSDB_NAMESPACE::ToString(ret));
   }
   return Status::OK();
 }
@@ -225,11 +226,12 @@ void* JemallocNodumpAllocator::Alloc(extent_hooks_t* extent, void* new_addr,
 
 Status JemallocNodumpAllocator::DestroyArena(unsigned arena_index) {
   assert(arena_index != 0);
-  std::string key = "arena." + std::to_string(arena_index) + ".destroy";
+  std::string key =
+      "arena." + ROCKSDB_NAMESPACE::ToString(arena_index) + ".destroy";
   int ret = mallctl(key.c_str(), nullptr, 0, nullptr, 0);
   if (ret != 0) {
     return Status::Incomplete("Failed to destroy jemalloc arena, error code: " +
-                              std::to_string(ret));
+                              ROCKSDB_NAMESPACE::ToString(ret));
   }
   return Status::OK();
 }

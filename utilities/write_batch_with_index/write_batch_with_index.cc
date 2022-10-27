@@ -25,10 +25,8 @@
 namespace ROCKSDB_NAMESPACE {
 struct WriteBatchWithIndex::Rep {
   explicit Rep(const Comparator* index_comparator, size_t reserved_bytes = 0,
-               size_t max_bytes = 0, bool _overwrite_key = false,
-               size_t protection_bytes_per_key = 0)
-      : write_batch(reserved_bytes, max_bytes, protection_bytes_per_key,
-                    index_comparator ? index_comparator->timestamp_size() : 0),
+               size_t max_bytes = 0, bool _overwrite_key = false)
+      : write_batch(reserved_bytes, max_bytes),
         comparator(index_comparator, &write_batch),
         skip_list(comparator, &arena),
         overwrite_key(_overwrite_key),
@@ -146,19 +144,10 @@ void WriteBatchWithIndex::Rep::AddNewEntry(uint32_t column_family_id) {
                           wb_data.size() - last_entry_offset);
   // Extract key
   Slice key;
-  bool success =
+  bool success __attribute__((__unused__));
+  success =
       ReadKeyFromWriteBatchEntry(&entry_ptr, &key, column_family_id != 0);
-#ifdef NDEBUG
-  (void)success;
-#endif
   assert(success);
-
-  const Comparator* const ucmp = comparator.GetComparator(column_family_id);
-  size_t ts_sz = ucmp ? ucmp->timestamp_size() : 0;
-
-  if (ts_sz > 0) {
-    key.remove_suffix(ts_sz);
-  }
 
   auto* mem = arena.Allocate(sizeof(WriteBatchIndexEntry));
   auto* index_entry =
@@ -250,14 +239,12 @@ Status WriteBatchWithIndex::Rep::ReBuildIndex() {
       case kTypeBeginUnprepareXID:
       case kTypeEndPrepareXID:
       case kTypeCommitXID:
-      case kTypeCommitXIDAndTimestamp:
       case kTypeRollbackXID:
       case kTypeNoop:
         break;
       default:
-        return Status::Corruption(
-            "unknown WriteBatch tag in ReBuildIndex",
-            std::to_string(static_cast<unsigned int>(tag)));
+        return Status::Corruption("unknown WriteBatch tag in ReBuildIndex",
+                                  ToString(static_cast<unsigned int>(tag)));
     }
   }
 
@@ -270,9 +257,9 @@ Status WriteBatchWithIndex::Rep::ReBuildIndex() {
 
 WriteBatchWithIndex::WriteBatchWithIndex(
     const Comparator* default_index_comparator, size_t reserved_bytes,
-    bool overwrite_key, size_t max_bytes, size_t protection_bytes_per_key)
+    bool overwrite_key, size_t max_bytes)
     : rep(new Rep(default_index_comparator, reserved_bytes, max_bytes,
-                  overwrite_key, protection_bytes_per_key)) {}
+                  overwrite_key)) {}
 
 WriteBatchWithIndex::~WriteBatchWithIndex() {}
 
@@ -335,16 +322,6 @@ Status WriteBatchWithIndex::Put(const Slice& key, const Slice& value) {
   return s;
 }
 
-Status WriteBatchWithIndex::Put(ColumnFamilyHandle* column_family,
-                                const Slice& /*key*/, const Slice& /*ts*/,
-                                const Slice& /*value*/) {
-  if (!column_family) {
-    return Status::InvalidArgument("column family handle cannot be nullptr");
-  }
-  // TODO: support WBWI::Put() with timestamp.
-  return Status::NotSupported();
-}
-
 Status WriteBatchWithIndex::Delete(ColumnFamilyHandle* column_family,
                                    const Slice& key) {
   rep->SetLastEntryOffset();
@@ -364,15 +341,6 @@ Status WriteBatchWithIndex::Delete(const Slice& key) {
   return s;
 }
 
-Status WriteBatchWithIndex::Delete(ColumnFamilyHandle* column_family,
-                                   const Slice& /*key*/, const Slice& /*ts*/) {
-  if (!column_family) {
-    return Status::InvalidArgument("column family handle cannot be nullptr");
-  }
-  // TODO: support WBWI::Delete() with timestamp.
-  return Status::NotSupported();
-}
-
 Status WriteBatchWithIndex::SingleDelete(ColumnFamilyHandle* column_family,
                                          const Slice& key) {
   rep->SetLastEntryOffset();
@@ -390,16 +358,6 @@ Status WriteBatchWithIndex::SingleDelete(const Slice& key) {
     rep->AddOrUpdateIndex(key, kSingleDeleteRecord);
   }
   return s;
-}
-
-Status WriteBatchWithIndex::SingleDelete(ColumnFamilyHandle* column_family,
-                                         const Slice& /*key*/,
-                                         const Slice& /*ts*/) {
-  if (!column_family) {
-    return Status::InvalidArgument("column family handle cannot be nullptr");
-  }
-  // TODO: support WBWI::SingleDelete() with timestamp.
-  return Status::NotSupported();
 }
 
 Status WriteBatchWithIndex::Merge(ColumnFamilyHandle* column_family,
@@ -504,12 +462,6 @@ Status WriteBatchWithIndex::GetFromBatchAndDB(DB* db,
 Status WriteBatchWithIndex::GetFromBatchAndDB(
     DB* db, const ReadOptions& read_options, ColumnFamilyHandle* column_family,
     const Slice& key, PinnableSlice* pinnable_val, ReadCallback* callback) {
-  const Comparator* const ucmp = rep->comparator.GetComparator(column_family);
-  size_t ts_sz = ucmp ? ucmp->timestamp_size() : 0;
-  if (ts_sz > 0 && !read_options.timestamp) {
-    return Status::InvalidArgument("Must specify timestamp");
-  }
-
   Status s;
   WriteBatchWithIndexInternal wbwii(db, column_family);
 
@@ -574,15 +526,6 @@ void WriteBatchWithIndex::MultiGetFromBatchAndDB(
     DB* db, const ReadOptions& read_options, ColumnFamilyHandle* column_family,
     const size_t num_keys, const Slice* keys, PinnableSlice* values,
     Status* statuses, bool sorted_input, ReadCallback* callback) {
-  const Comparator* const ucmp = rep->comparator.GetComparator(column_family);
-  size_t ts_sz = ucmp ? ucmp->timestamp_size() : 0;
-  if (ts_sz > 0 && !read_options.timestamp) {
-    for (size_t i = 0; i < num_keys; ++i) {
-      statuses[i] = Status::InvalidArgument("Must specify timestamp");
-    }
-    return;
-  }
-
   WriteBatchWithIndexInternal wbwii(db, column_family);
 
   autovector<KeyContext, MultiGetContext::MAX_BATCH_SIZE> key_context;
@@ -683,12 +626,6 @@ void WriteBatchWithIndex::SetMaxBytes(size_t max_bytes) {
 
 size_t WriteBatchWithIndex::GetDataSize() const {
   return rep->write_batch.GetDataSize();
-}
-
-const Comparator* WriteBatchWithIndexInternal::GetUserComparator(
-    const WriteBatchWithIndex& wbwi, uint32_t cf_id) {
-  const WriteBatchEntryComparator& ucmps = wbwi.rep->comparator;
-  return ucmps.GetComparator(cf_id);
 }
 
 }  // namespace ROCKSDB_NAMESPACE

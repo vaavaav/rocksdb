@@ -44,7 +44,7 @@ class SimCacheTest : public DBTestBase {
   void InitTable(const Options& /*options*/) {
     std::string value(kValueSize, 'a');
     for (size_t i = 0; i < kNumBlocks * 2; i++) {
-      ASSERT_OK(Put(std::to_string(i), value.c_str()));
+      ASSERT_OK(Put(ToString(i), value.c_str()));
     }
   }
 
@@ -98,7 +98,7 @@ TEST_F(SimCacheTest, SimCache) {
   // Load blocks into cache.
   for (size_t i = 0; i < kNumBlocks; i++) {
     iter = db_->NewIterator(read_options);
-    iter->Seek(std::to_string(i));
+    iter->Seek(ToString(i));
     ASSERT_OK(iter->status());
     CheckCacheCounters(options, 1, 0, 1, 0);
     iterators[i].reset(iter);
@@ -115,8 +115,8 @@ TEST_F(SimCacheTest, SimCache) {
   // Test with strict capacity limit.
   simCache->SetStrictCapacityLimit(true);
   iter = db_->NewIterator(read_options);
-  iter->Seek(std::to_string(kNumBlocks * 2 - 1));
-  ASSERT_TRUE(iter->status().IsMemoryLimit());
+  iter->Seek(ToString(kNumBlocks * 2 - 1));
+  ASSERT_TRUE(iter->status().IsIncomplete());
   CheckCacheCounters(options, 1, 0, 0, 1);
   delete iter;
   iter = nullptr;
@@ -129,14 +129,14 @@ TEST_F(SimCacheTest, SimCache) {
   // Add kNumBlocks again
   for (size_t i = 0; i < kNumBlocks; i++) {
     std::unique_ptr<Iterator> it(db_->NewIterator(read_options));
-    it->Seek(std::to_string(i));
+    it->Seek(ToString(i));
     ASSERT_OK(it->status());
     CheckCacheCounters(options, 0, 1, 0, 0);
   }
   ASSERT_EQ(5, simCache->get_hit_counter());
   for (size_t i = kNumBlocks; i < kNumBlocks * 2; i++) {
     std::unique_ptr<Iterator> it(db_->NewIterator(read_options));
-    it->Seek(std::to_string(i));
+    it->Seek(ToString(i));
     ASSERT_OK(it->status());
     CheckCacheCounters(options, 1, 0, 1, 0);
   }

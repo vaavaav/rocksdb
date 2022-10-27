@@ -5,14 +5,12 @@
 package org.rocksdb;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.*;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.assertj.core.api.AbstractObjectAssert;
-import org.assertj.core.api.ObjectAssert;
 import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
@@ -39,7 +37,7 @@ public class EventListenerTest {
       rand.nextBytes(value);
       db.put("testKey".getBytes(), value);
       db.flush(new FlushOptions());
-      assertThat(wasCbCalled.get()).isTrue();
+      assertTrue(wasCbCalled.get());
     }
   }
 
@@ -49,8 +47,8 @@ public class EventListenerTest {
     final AbstractEventListener onFlushCompletedListener = new AbstractEventListener() {
       @Override
       public void onFlushCompleted(final RocksDB rocksDb, final FlushJobInfo flushJobInfo) {
-        assertThat(flushJobInfo.getColumnFamilyName()).isNotNull();
-        assertThat(flushJobInfo.getFlushReason()).isEqualTo(FlushReason.MANUAL_FLUSH);
+        assertNotNull(flushJobInfo.getColumnFamilyName());
+        assertEquals(FlushReason.MANUAL_FLUSH, flushJobInfo.getFlushReason());
         wasCbCalled.set(true);
       }
     };
@@ -63,8 +61,8 @@ public class EventListenerTest {
     final AbstractEventListener onFlushBeginListener = new AbstractEventListener() {
       @Override
       public void onFlushBegin(final RocksDB rocksDb, final FlushJobInfo flushJobInfo) {
-        assertThat(flushJobInfo.getColumnFamilyName()).isNotNull();
-        assertThat(flushJobInfo.getFlushReason()).isEqualTo(FlushReason.MANUAL_FLUSH);
+        assertNotNull(flushJobInfo.getColumnFamilyName());
+        assertEquals(FlushReason.MANUAL_FLUSH, flushJobInfo.getFlushReason());
         wasCbCalled.set(true);
       }
     };
@@ -81,21 +79,21 @@ public class EventListenerTest {
       rand.nextBytes(value);
       db.put("testKey".getBytes(), value);
       final RocksDB.LiveFiles liveFiles = db.getLiveFiles();
-      assertThat(liveFiles).isNotNull();
-      assertThat(liveFiles.files).isNotNull();
-      assertThat(liveFiles.files.isEmpty()).isFalse();
+      assertNotNull(liveFiles);
+      assertNotNull(liveFiles.files);
+      assertFalse(liveFiles.files.isEmpty());
       db.deleteFile(liveFiles.files.get(0));
-      assertThat(wasCbCalled.get()).isTrue();
+      assertTrue(wasCbCalled.get());
     }
   }
 
   @Test
-  public void onTableFileDeleted() throws RocksDBException {
+  public void onTableFileDeleted() throws RocksDBException, InterruptedException {
     final AtomicBoolean wasCbCalled = new AtomicBoolean();
     final AbstractEventListener onTableFileDeletedListener = new AbstractEventListener() {
       @Override
       public void onTableFileDeleted(final TableFileDeletionInfo tableFileDeletionInfo) {
-        assertThat(tableFileDeletionInfo.getDbName()).isNotNull();
+        assertNotNull(tableFileDeletionInfo.getDbName());
         wasCbCalled.set(true);
       }
     };
@@ -112,7 +110,7 @@ public class EventListenerTest {
       rand.nextBytes(value);
       db.put("testKey".getBytes(), value);
       db.compactRange();
-      assertThat(wasCbCalled.get()).isTrue();
+      assertTrue(wasCbCalled.get());
     }
   }
 
@@ -122,8 +120,7 @@ public class EventListenerTest {
     final AbstractEventListener onCompactionBeginListener = new AbstractEventListener() {
       @Override
       public void onCompactionBegin(final RocksDB db, final CompactionJobInfo compactionJobInfo) {
-        assertThat(compactionJobInfo.compactionReason())
-            .isEqualTo(CompactionReason.kManualCompaction);
+        assertEquals(CompactionReason.kManualCompaction, compactionJobInfo.compactionReason());
         wasCbCalled.set(true);
       }
     };
@@ -137,8 +134,7 @@ public class EventListenerTest {
       @Override
       public void onCompactionCompleted(
           final RocksDB db, final CompactionJobInfo compactionJobInfo) {
-        assertThat(compactionJobInfo.compactionReason())
-            .isEqualTo(CompactionReason.kManualCompaction);
+        assertEquals(CompactionReason.kManualCompaction, compactionJobInfo.compactionReason());
         wasCbCalled.set(true);
       }
     };
@@ -151,7 +147,7 @@ public class EventListenerTest {
     final AbstractEventListener onTableFileCreatedListener = new AbstractEventListener() {
       @Override
       public void onTableFileCreated(final TableFileCreationInfo tableFileCreationInfo) {
-        assertThat(tableFileCreationInfo.getReason()).isEqualTo(TableFileCreationReason.FLUSH);
+        assertEquals(TableFileCreationReason.FLUSH, tableFileCreationInfo.getReason());
         wasCbCalled.set(true);
       }
     };
@@ -165,7 +161,7 @@ public class EventListenerTest {
       @Override
       public void onTableFileCreationStarted(
           final TableFileCreationBriefInfo tableFileCreationBriefInfo) {
-        assertThat(tableFileCreationBriefInfo.getReason()).isEqualTo(TableFileCreationReason.FLUSH);
+        assertEquals(TableFileCreationReason.FLUSH, tableFileCreationBriefInfo.getReason());
         wasCbCalled.set(true);
       }
     };
@@ -183,7 +179,7 @@ public class EventListenerTest {
       db.put("testKey".getBytes(), value);
       ColumnFamilyHandle columnFamilyHandle = db.getDefaultColumnFamily();
       columnFamilyHandle.close();
-      assertThat(wasCbCalled.get()).isTrue();
+      assertTrue(wasCbCalled.get());
     }
   }
 
@@ -195,7 +191,7 @@ public class EventListenerTest {
           @Override
           public void onColumnFamilyHandleDeletionStarted(
               final ColumnFamilyHandle columnFamilyHandle) {
-            assertThat(columnFamilyHandle).isNotNull();
+            assertNotNull(columnFamilyHandle);
             wasCbCalled.set(true);
           }
         };
@@ -216,7 +212,7 @@ public class EventListenerTest {
       sstFileWriter.finish();
       db.ingestExternalFile(
           Collections.singletonList(externalFilePath.toString()), new IngestExternalFileOptions());
-      assertThat(wasCbCalled.get()).isTrue();
+      assertTrue(wasCbCalled.get());
     }
   }
 
@@ -227,7 +223,7 @@ public class EventListenerTest {
       @Override
       public void onExternalFileIngested(
           final RocksDB db, final ExternalFileIngestionInfo externalFileIngestionInfo) {
-        assertThat(db).isNotNull();
+        assertNotNull(db);
         wasCbCalled.set(true);
       }
     };
@@ -236,6 +232,7 @@ public class EventListenerTest {
 
   @Test
   public void testAllCallbacksInvocation() {
+    final int TEST_INT_VAL = -1;
     final long TEST_LONG_VAL = -1;
     // Expected test data objects
     final Map<String, String> userCollectedPropertiesTestData =
@@ -275,79 +272,75 @@ public class EventListenerTest {
       @Override
       public void onFlushCompleted(final RocksDB db, final FlushJobInfo flushJobInfo) {
         super.onFlushCompleted(db, flushJobInfo);
-        assertThat(flushJobInfo).isEqualTo(flushJobInfoTestData);
+        assertEquals(flushJobInfoTestData, flushJobInfo);
       }
 
       @Override
       public void onFlushBegin(final RocksDB db, final FlushJobInfo flushJobInfo) {
         super.onFlushBegin(db, flushJobInfo);
-        assertThat(flushJobInfo).isEqualTo(flushJobInfoTestData);
+        assertEquals(flushJobInfoTestData, flushJobInfo);
       }
 
       @Override
       public void onTableFileDeleted(final TableFileDeletionInfo tableFileDeletionInfo) {
         super.onTableFileDeleted(tableFileDeletionInfo);
-        assertThat(tableFileDeletionInfo).isEqualTo(tableFileDeletionInfoTestData);
+        assertEquals(tableFileDeletionInfoTestData, tableFileDeletionInfo);
       }
 
       @Override
       public void onCompactionBegin(final RocksDB db, final CompactionJobInfo compactionJobInfo) {
         super.onCompactionBegin(db, compactionJobInfo);
-        assertThat(new String(compactionJobInfo.columnFamilyName(), StandardCharsets.UTF_8))
-            .isEqualTo("compactionColumnFamily");
-        assertThat(compactionJobInfo.status()).isEqualTo(statusTestData);
-        assertThat(compactionJobInfo.threadId()).isEqualTo(TEST_LONG_VAL);
-        assertThat(compactionJobInfo.jobId()).isEqualTo(Integer.MAX_VALUE);
-        assertThat(compactionJobInfo.baseInputLevel()).isEqualTo(Integer.MAX_VALUE);
-        assertThat(compactionJobInfo.outputLevel()).isEqualTo(Integer.MAX_VALUE);
-        assertThat(compactionJobInfo.inputFiles())
-            .isEqualTo(Collections.singletonList("inputFile.sst"));
-        assertThat(compactionJobInfo.outputFiles())
-            .isEqualTo(Collections.singletonList("outputFile.sst"));
-        assertThat(compactionJobInfo.tableProperties())
-            .isEqualTo(Collections.singletonMap("tableProperties", tablePropertiesTestData));
-        assertThat(compactionJobInfo.compactionReason()).isEqualTo(CompactionReason.kFlush);
-        assertThat(compactionJobInfo.compression()).isEqualTo(CompressionType.SNAPPY_COMPRESSION);
+        assertArrayEquals(
+            "compactionColumnFamily".getBytes(), compactionJobInfo.columnFamilyName());
+        assertEquals(statusTestData, compactionJobInfo.status());
+        assertEquals(TEST_LONG_VAL, compactionJobInfo.threadId());
+        assertEquals(Integer.MAX_VALUE, compactionJobInfo.jobId());
+        assertEquals(Integer.MAX_VALUE, compactionJobInfo.baseInputLevel());
+        assertEquals(Integer.MAX_VALUE, compactionJobInfo.outputLevel());
+        assertEquals(Collections.singletonList("inputFile.sst"), compactionJobInfo.inputFiles());
+        assertEquals(Collections.singletonList("outputFile.sst"), compactionJobInfo.outputFiles());
+        assertEquals(Collections.singletonMap("tableProperties", tablePropertiesTestData),
+            compactionJobInfo.tableProperties());
+        assertEquals(CompactionReason.kFlush, compactionJobInfo.compactionReason());
+        assertEquals(CompressionType.SNAPPY_COMPRESSION, compactionJobInfo.compression());
       }
 
       @Override
       public void onCompactionCompleted(
           final RocksDB db, final CompactionJobInfo compactionJobInfo) {
         super.onCompactionCompleted(db, compactionJobInfo);
-        assertThat(new String(compactionJobInfo.columnFamilyName()))
-            .isEqualTo("compactionColumnFamily");
-        assertThat(compactionJobInfo.status()).isEqualTo(statusTestData);
-        assertThat(compactionJobInfo.threadId()).isEqualTo(TEST_LONG_VAL);
-        assertThat(compactionJobInfo.jobId()).isEqualTo(Integer.MAX_VALUE);
-        assertThat(compactionJobInfo.baseInputLevel()).isEqualTo(Integer.MAX_VALUE);
-        assertThat(compactionJobInfo.outputLevel()).isEqualTo(Integer.MAX_VALUE);
-        assertThat(compactionJobInfo.inputFiles())
-            .isEqualTo(Collections.singletonList("inputFile.sst"));
-        assertThat(compactionJobInfo.outputFiles())
-            .isEqualTo(Collections.singletonList("outputFile.sst"));
-        assertThat(compactionJobInfo.tableProperties())
-            .isEqualTo(Collections.singletonMap("tableProperties", tablePropertiesTestData));
-        assertThat(compactionJobInfo.compactionReason()).isEqualTo(CompactionReason.kFlush);
-        assertThat(compactionJobInfo.compression()).isEqualTo(CompressionType.SNAPPY_COMPRESSION);
+        assertArrayEquals(
+            "compactionColumnFamily".getBytes(), compactionJobInfo.columnFamilyName());
+        assertEquals(statusTestData, compactionJobInfo.status());
+        assertEquals(TEST_LONG_VAL, compactionJobInfo.threadId());
+        assertEquals(Integer.MAX_VALUE, compactionJobInfo.jobId());
+        assertEquals(Integer.MAX_VALUE, compactionJobInfo.baseInputLevel());
+        assertEquals(Integer.MAX_VALUE, compactionJobInfo.outputLevel());
+        assertEquals(Collections.singletonList("inputFile.sst"), compactionJobInfo.inputFiles());
+        assertEquals(Collections.singletonList("outputFile.sst"), compactionJobInfo.outputFiles());
+        assertEquals(Collections.singletonMap("tableProperties", tablePropertiesTestData),
+            compactionJobInfo.tableProperties());
+        assertEquals(CompactionReason.kFlush, compactionJobInfo.compactionReason());
+        assertEquals(CompressionType.SNAPPY_COMPRESSION, compactionJobInfo.compression());
       }
 
       @Override
       public void onTableFileCreated(final TableFileCreationInfo tableFileCreationInfo) {
         super.onTableFileCreated(tableFileCreationInfo);
-        assertThat(tableFileCreationInfo).isEqualTo(tableFileCreationInfoTestData);
+        assertEquals(tableFileCreationInfoTestData, tableFileCreationInfo);
       }
 
       @Override
       public void onTableFileCreationStarted(
           final TableFileCreationBriefInfo tableFileCreationBriefInfo) {
         super.onTableFileCreationStarted(tableFileCreationBriefInfo);
-        assertThat(tableFileCreationBriefInfo).isEqualTo(tableFileCreationBriefInfoTestData);
+        assertEquals(tableFileCreationBriefInfoTestData, tableFileCreationBriefInfo);
       }
 
       @Override
       public void onMemTableSealed(final MemTableInfo memTableInfo) {
         super.onMemTableSealed(memTableInfo);
-        assertThat(memTableInfo).isEqualTo(memTableInfoTestData);
+        assertEquals(memTableInfoTestData, memTableInfo);
       }
 
       @Override
@@ -359,7 +352,7 @@ public class EventListenerTest {
       public void onExternalFileIngested(
           final RocksDB db, final ExternalFileIngestionInfo externalFileIngestionInfo) {
         super.onExternalFileIngested(db, externalFileIngestionInfo);
-        assertThat(externalFileIngestionInfo).isEqualTo(externalFileIngestionInfoTestData);
+        assertEquals(externalFileIngestionInfoTestData, externalFileIngestionInfo);
       }
 
       @Override
@@ -371,49 +364,49 @@ public class EventListenerTest {
       @Override
       public void onStallConditionsChanged(final WriteStallInfo writeStallInfo) {
         super.onStallConditionsChanged(writeStallInfo);
-        assertThat(writeStallInfo).isEqualTo(writeStallInfoTestData);
+        assertEquals(writeStallInfoTestData, writeStallInfo);
       }
 
       @Override
       public void onFileReadFinish(final FileOperationInfo fileOperationInfo) {
         super.onFileReadFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
       }
 
       @Override
       public void onFileWriteFinish(final FileOperationInfo fileOperationInfo) {
         super.onFileWriteFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
       }
 
       @Override
       public void onFileFlushFinish(final FileOperationInfo fileOperationInfo) {
         super.onFileFlushFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
       }
 
       @Override
       public void onFileSyncFinish(final FileOperationInfo fileOperationInfo) {
         super.onFileSyncFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
       }
 
       @Override
       public void onFileRangeSyncFinish(final FileOperationInfo fileOperationInfo) {
         super.onFileRangeSyncFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
       }
 
       @Override
       public void onFileTruncateFinish(final FileOperationInfo fileOperationInfo) {
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
         super.onFileTruncateFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
       }
 
       @Override
       public void onFileCloseFinish(final FileOperationInfo fileOperationInfo) {
         super.onFileCloseFinish(fileOperationInfo);
-        assertThat(fileOperationInfo).isEqualTo(fileOperationInfoTestData);
+        assertEquals(fileOperationInfoTestData, fileOperationInfo);
       }
 
       @Override
@@ -426,15 +419,15 @@ public class EventListenerTest {
       public boolean onErrorRecoveryBegin(
           final BackgroundErrorReason backgroundErrorReason, final Status backgroundError) {
         super.onErrorRecoveryBegin(backgroundErrorReason, backgroundError);
-        assertThat(backgroundErrorReason).isEqualTo(BackgroundErrorReason.FLUSH);
-        assertThat(backgroundError).isEqualTo(statusTestData);
+        assertEquals(BackgroundErrorReason.FLUSH, backgroundErrorReason);
+        assertEquals(statusTestData, backgroundError);
         return true;
       }
 
       @Override
       public void onErrorRecoveryCompleted(final Status oldBackgroundError) {
         super.onErrorRecoveryCompleted(oldBackgroundError);
-        assertThat(oldBackgroundError).isEqualTo(statusTestData);
+        assertEquals(statusTestData, oldBackgroundError);
       }
     };
 
@@ -443,13 +436,11 @@ public class EventListenerTest {
 
     // assert
     assertAllEventsCalled(listener);
-
-    assertNoCallbackErrors(listener);
   }
 
   @Test
   public void testEnabledCallbacks() {
-    final EnabledEventCallback[] enabledEvents = {
+    final EnabledEventCallback enabledEvents[] = {
         EnabledEventCallback.ON_MEMTABLE_SEALED, EnabledEventCallback.ON_ERROR_RECOVERY_COMPLETED};
 
     final CapturingTestableEventListener listener =
@@ -473,65 +464,146 @@ public class EventListenerTest {
     assertEventsCalled(capturingTestableEventListener, EnumSet.copyOf(Arrays.asList(expected)));
   }
 
-  private static void assertNoCallbackErrors(
-      final CapturingTestableEventListener capturingTestableEventListener) {
-    for (AssertionError error : capturingTestableEventListener.capturedAssertionErrors) {
-      throw new Error("An assertion failed in callback", error);
-    }
-  }
-
   private static void assertEventsCalled(
       final CapturingTestableEventListener capturingTestableEventListener,
       final EnumSet<EnabledEventCallback> expected) {
     final ListenerEvents capturedEvents = capturingTestableEventListener.capturedListenerEvents;
 
-    assertThat(capturedEvents.flushCompleted)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FLUSH_COMPLETED));
-    assertThat(capturedEvents.flushBegin)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FLUSH_BEGIN));
-    assertThat(capturedEvents.tableFileDeleted)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_TABLE_FILE_DELETED));
-    assertThat(capturedEvents.compactionBegin)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_COMPACTION_BEGIN));
-    assertThat(capturedEvents.compactionCompleted)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_COMPACTION_COMPLETED));
-    assertThat(capturedEvents.tableFileCreated)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_TABLE_FILE_CREATED));
-    assertThat(capturedEvents.tableFileCreationStarted)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_TABLE_FILE_CREATION_STARTED));
-    assertThat(capturedEvents.memTableSealed)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_MEMTABLE_SEALED));
-    assertThat(capturedEvents.columnFamilyHandleDeletionStarted)
-        .isEqualTo(
-            expected.contains(EnabledEventCallback.ON_COLUMN_FAMILY_HANDLE_DELETION_STARTED));
-    assertThat(capturedEvents.externalFileIngested)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_EXTERNAL_FILE_INGESTED));
-    assertThat(capturedEvents.backgroundError)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_BACKGROUND_ERROR));
-    assertThat(capturedEvents.stallConditionsChanged)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_STALL_CONDITIONS_CHANGED));
-    assertThat(capturedEvents.fileReadFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_READ_FINISH));
-    assertThat(capturedEvents.fileWriteFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_WRITE_FINISH));
-    assertThat(capturedEvents.fileFlushFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_FLUSH_FINISH));
-    assertThat(capturedEvents.fileSyncFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_SYNC_FINISH));
-    assertThat(capturedEvents.fileRangeSyncFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_RANGE_SYNC_FINISH));
-    assertThat(capturedEvents.fileTruncateFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_TRUNCATE_FINISH));
-    assertThat(capturedEvents.fileCloseFinish)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_FILE_CLOSE_FINISH));
-    assertThat(capturedEvents.shouldBeNotifiedOnFileIO)
-        .isEqualTo(expected.contains(EnabledEventCallback.SHOULD_BE_NOTIFIED_ON_FILE_IO));
-    assertThat(capturedEvents.errorRecoveryBegin)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_ERROR_RECOVERY_BEGIN));
-    assertThat(capturedEvents.errorRecoveryCompleted)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_ERROR_RECOVERY_COMPLETED));
-    assertThat(capturedEvents.errorRecoveryCompleted)
-        .isEqualTo(expected.contains(EnabledEventCallback.ON_ERROR_RECOVERY_COMPLETED));
+    if (expected.contains(EnabledEventCallback.ON_FLUSH_COMPLETED)) {
+      assertTrue("onFlushCompleted was not called", capturedEvents.flushCompleted);
+    } else {
+      assertFalse("onFlushCompleted was not called", capturedEvents.flushCompleted);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FLUSH_BEGIN)) {
+      assertTrue("onFlushBegin was not called", capturedEvents.flushBegin);
+    } else {
+      assertFalse("onFlushBegin was called", capturedEvents.flushBegin);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_TABLE_FILE_DELETED)) {
+      assertTrue("onTableFileDeleted was not called", capturedEvents.tableFileDeleted);
+    } else {
+      assertFalse("onTableFileDeleted was called", capturedEvents.tableFileDeleted);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_COMPACTION_BEGIN)) {
+      assertTrue("onCompactionBegin was not called", capturedEvents.compactionBegin);
+    } else {
+      assertFalse("onCompactionBegin was called", capturedEvents.compactionBegin);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_COMPACTION_COMPLETED)) {
+      assertTrue("onCompactionCompleted was not called", capturedEvents.compactionCompleted);
+    } else {
+      assertFalse("onCompactionCompleted was called", capturedEvents.compactionCompleted);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_TABLE_FILE_CREATED)) {
+      assertTrue("onTableFileCreated was not called", capturedEvents.tableFileCreated);
+    } else {
+      assertFalse("onTableFileCreated was called", capturedEvents.tableFileCreated);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_TABLE_FILE_CREATION_STARTED)) {
+      assertTrue(
+          "onTableFileCreationStarted was not called", capturedEvents.tableFileCreationStarted);
+    } else {
+      assertFalse("onTableFileCreationStarted was called", capturedEvents.tableFileCreationStarted);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_MEMTABLE_SEALED)) {
+      assertTrue("onMemTableSealed was not called", capturedEvents.memTableSealed);
+    } else {
+      assertFalse("onMemTableSealed was called", capturedEvents.memTableSealed);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_COLUMN_FAMILY_HANDLE_DELETION_STARTED)) {
+      assertTrue("onColumnFamilyHandleDeletionStarted was not called",
+          capturedEvents.columnFamilyHandleDeletionStarted);
+    } else {
+      assertFalse("onColumnFamilyHandleDeletionStarted was called",
+          capturedEvents.columnFamilyHandleDeletionStarted);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_EXTERNAL_FILE_INGESTED)) {
+      assertTrue("onExternalFileIngested was not called", capturedEvents.externalFileIngested);
+    } else {
+      assertFalse("onExternalFileIngested was called", capturedEvents.externalFileIngested);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_BACKGROUND_ERROR)) {
+      assertTrue("onBackgroundError was not called", capturedEvents.backgroundError);
+    } else {
+      assertFalse("onBackgroundError was called", capturedEvents.backgroundError);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_STALL_CONDITIONS_CHANGED)) {
+      assertTrue("onStallConditionsChanged was not called", capturedEvents.stallConditionsChanged);
+    } else {
+      assertFalse("onStallConditionsChanged was called", capturedEvents.stallConditionsChanged);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_READ_FINISH)) {
+      assertTrue("onFileReadFinish was not called", capturedEvents.fileReadFinish);
+    } else {
+      assertFalse("onFileReadFinish was called", capturedEvents.fileReadFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_WRITE_FINISH)) {
+      assertTrue("onFileWriteFinish was not called", capturedEvents.fileWriteFinish);
+    } else {
+      assertFalse("onFileWriteFinish was called", capturedEvents.fileWriteFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_FLUSH_FINISH)) {
+      assertTrue("onFileFlushFinish was not called", capturedEvents.fileFlushFinish);
+    } else {
+      assertFalse("onFileFlushFinish was called", capturedEvents.fileFlushFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_SYNC_FINISH)) {
+      assertTrue("onFileSyncFinish was not called", capturedEvents.fileSyncFinish);
+    } else {
+      assertFalse("onFileSyncFinish was called", capturedEvents.fileSyncFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_RANGE_SYNC_FINISH)) {
+      assertTrue("onFileRangeSyncFinish was not called", capturedEvents.fileRangeSyncFinish);
+    } else {
+      assertFalse("onFileRangeSyncFinish was called", capturedEvents.fileRangeSyncFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_TRUNCATE_FINISH)) {
+      assertTrue("onFileTruncateFinish was not called", capturedEvents.fileTruncateFinish);
+    } else {
+      assertFalse("onFileTruncateFinish was called", capturedEvents.fileTruncateFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_FILE_CLOSE_FINISH)) {
+      assertTrue("onFileCloseFinish was not called", capturedEvents.fileCloseFinish);
+    } else {
+      assertFalse("onFileCloseFinish was called", capturedEvents.fileCloseFinish);
+    }
+
+    if (expected.contains(EnabledEventCallback.SHOULD_BE_NOTIFIED_ON_FILE_IO)) {
+      assertTrue(
+          "shouldBeNotifiedOnFileIO was not called", capturedEvents.shouldBeNotifiedOnFileIO);
+    } else {
+      assertFalse("shouldBeNotifiedOnFileIO was called", capturedEvents.shouldBeNotifiedOnFileIO);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_ERROR_RECOVERY_BEGIN)) {
+      assertTrue("onErrorRecoveryBegin was not called", capturedEvents.errorRecoveryBegin);
+    } else {
+      assertFalse("onErrorRecoveryBegin was called", capturedEvents.errorRecoveryBegin);
+    }
+
+    if (expected.contains(EnabledEventCallback.ON_ERROR_RECOVERY_COMPLETED)) {
+      assertTrue("onErrorRecoveryCompleted was not called", capturedEvents.errorRecoveryCompleted);
+    } else {
+      assertFalse("onErrorRecoveryCompleted was called", capturedEvents.errorRecoveryCompleted);
+    }
   }
 
   /**
@@ -563,42 +635,8 @@ public class EventListenerTest {
     volatile boolean errorRecoveryCompleted;
   }
 
-  private static class CapturingObjectAssert<T> extends ObjectAssert<T> {
-    private final List<AssertionError> assertionErrors;
-    public CapturingObjectAssert(T t, List<AssertionError> assertionErrors) {
-      super(t);
-      this.assertionErrors = assertionErrors;
-    }
-
-    @Override
-    public ObjectAssert<T> isEqualTo(Object other) {
-      try {
-        return super.isEqualTo(other);
-      } catch (AssertionError error) {
-        assertionErrors.add(error);
-        throw error;
-      }
-    }
-
-    @Override
-    public ObjectAssert<T> isNotNull() {
-      try {
-        return super.isNotNull();
-      } catch (AssertionError error) {
-        assertionErrors.add(error);
-        throw error;
-      }
-    }
-  }
-
   private static class CapturingTestableEventListener extends TestableEventListener {
     final ListenerEvents capturedListenerEvents = new ListenerEvents();
-
-    final List<AssertionError> capturedAssertionErrors = new ArrayList<>();
-
-    protected <T> AbstractObjectAssert<?, T> assertThat(T actual) {
-      return new CapturingObjectAssert<T>(actual, capturedAssertionErrors);
-    }
 
     public CapturingTestableEventListener() {}
 

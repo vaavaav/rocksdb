@@ -58,7 +58,6 @@ enum EntryType {
   kEntryRangeDeletion,
   kEntryBlobIndex,
   kEntryDeleteWithTimestamp,
-  kEntryWideColumnEntity,
   kEntryOther,
 };
 

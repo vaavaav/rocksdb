@@ -6,9 +6,7 @@ This is the list of all known third-party language bindings for RocksDB. If some
     * http://pyrocksdb.readthedocs.org/en/latest/ (unmaintained)
 * Perl - https://metacpan.org/pod/RocksDB
 * Node.js - https://npmjs.org/package/rocksdb
-* Go 
-  * https://github.com/linxGnu/grocksdb
-  * https://github.com/tecbot/gorocksdb (unmaintained)
+* Go - https://github.com/tecbot/gorocksdb
 * Ruby - http://rubygems.org/gems/rocksdb-ruby
 * Haskell - https://hackage.haskell.org/package/rocksdb-haskell
 * PHP - https://github.com/Photonios/rocksdb-php

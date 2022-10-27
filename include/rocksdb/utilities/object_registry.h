@@ -13,10 +13,10 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "rocksdb/status.h"
+#include "rocksdb/utilities/regex.h"
 
 namespace ROCKSDB_NAMESPACE {
 class Customizable;
@@ -51,6 +51,28 @@ class ObjectLibrary {
     virtual const char* Name() const = 0;
   };
 
+  // A class that implements an Entry based on Regex.
+  //
+  // WARNING: some regexes are problematic for std::regex; see
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61582 for example
+  //
+  // This class is deprecated and will be removed in a future release
+  class RegexEntry : public Entry {
+   public:
+    explicit RegexEntry(const std::string& name) : name_(name) {
+      Regex::Parse(name, &regex_).PermitUncheckedError();
+    }
+
+    bool Matches(const std::string& target) const override {
+      return regex_.Matches(target);
+    }
+    const char* Name() const override { return name_.c_str(); }
+
+   private:
+    std::string name_;
+    Regex regex_;  // The pattern for this entry
+  };
+
  public:
   // Class for matching target strings to a pattern.
   // Entries consist of a name that starts the pattern and attributes
@@ -76,8 +98,7 @@ class ObjectLibrary {
       kMatchZeroOrMore,  // [suffix].*
       kMatchAtLeastOne,  // [suffix].+
       kMatchExact,       // [suffix]
-      kMatchInteger,     // [suffix][0-9]+
-      kMatchDecimal,     // [suffix][0-9]+[.][0-9]+
+      kMatchNumeric,     // [suffix][0-9]+
     };
 
    public:
@@ -125,9 +146,8 @@ class ObjectLibrary {
 
     // Adds a separator (exact match of separator with trailing numbers) to the
     // entry
-    PatternEntry& AddNumber(const std::string& separator, bool is_int = true) {
-      separators_.emplace_back(separator,
-                               (is_int) ? kMatchInteger : kMatchDecimal);
+    PatternEntry& AddNumber(const std::string& separator) {
+      separators_.emplace_back(separator, kMatchNumeric);
       slength_ += separator.size() + 1;
       return *this;
     }
@@ -218,19 +238,24 @@ class ObjectLibrary {
   // @param num_types returns how many unique types are registered.
   size_t GetFactoryCount(size_t* num_types) const;
 
-  // Returns the number of factories registered for this library
-  // for the input type.
-  // @param num_types returns how many unique types are registered.
-  size_t GetFactoryCount(const std::string& type) const;
-
-  // Returns the registered factory names for the input type
-  // names is updated to include the names for the type
-  void GetFactoryNames(const std::string& type,
-                       std::vector<std::string>* names) const;
-
-  void GetFactoryTypes(std::unordered_set<std::string>* types) const;
-
   void Dump(Logger* logger) const;
+
+  // Registers the factory with the library for the regular expression pattern.
+  // If the pattern matches, the factory may be used to create a new object.
+  //
+  // WARNING: some regexes are problematic for std::regex; see
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61582 for example
+  //
+  // Deprecated. Will be removed in a major release. Code should use AddFactory
+  // instead.
+  template <typename T>
+  const FactoryFunc<T>& Register(const std::string& pattern,
+                                 const FactoryFunc<T>& factory) {
+    std::unique_ptr<Entry> entry(
+        new FactoryEntry<T>(new RegexEntry(pattern), factory));
+    AddFactoryEntry(T::Type(), std::move(entry));
+    return factory;
+  }
 
   // Registers the factory with the library for the name.
   // If name==target, the factory may be used to create a new object.
@@ -247,7 +272,6 @@ class ObjectLibrary {
   // If the entry matches the target, the factory may be used to create a new
   // object.
   // @see PatternEntry for the matching rules.
-  // NOTE: This function replaces the old ObjectLibrary::Register()
   template <typename T>
   const FactoryFunc<T>& AddFactory(const PatternEntry& entry,
                                    const FactoryFunc<T>& func) {
@@ -293,7 +317,6 @@ class ObjectRegistry {
   static std::shared_ptr<ObjectRegistry> Default();
   explicit ObjectRegistry(const std::shared_ptr<ObjectRegistry>& parent)
       : parent_(parent) {}
-  explicit ObjectRegistry(const std::shared_ptr<ObjectLibrary>& library);
 
   std::shared_ptr<ObjectLibrary> AddLibrary(const std::string& id) {
     auto library = std::make_shared<ObjectLibrary>(id);
@@ -312,31 +335,29 @@ class ObjectRegistry {
     library->Register(registrar, arg);
   }
 
-  // Finds the factory for target and instantiates a new T.
-  // Returns NotSupported if no factory is found
-  // Returns InvalidArgument if a factory is found but the factory failed.
+  // Creates a new T using the factory function that was registered for this
+  // target.  Searches through the libraries to find the first library where
+  // there is an entry that matches target (see PatternEntry for the matching
+  // rules).
+  //
+  // If no registered functions match, returns nullptr. If multiple functions
+  // match, the factory function used is unspecified.
+  //
+  // Populates guard with result pointer if caller is granted ownership.
+  // Deprecated.  Use NewShared/Static/UniqueObject instead.
   template <typename T>
-  Status NewObject(const std::string& target, T** object,
-                   std::unique_ptr<T>* guard) {
-    assert(guard != nullptr);
+  T* NewObject(const std::string& target, std::unique_ptr<T>* guard,
+               std::string* errmsg) {
     guard->reset();
     auto factory = FindFactory<T>(target);
     if (factory != nullptr) {
-      std::string errmsg;
-      *object = factory(target, guard, &errmsg);
-      if (*object != nullptr) {
-        return Status::OK();
-      } else if (errmsg.empty()) {
-        return Status::InvalidArgument(
-            std::string("Could not load ") + T::Type(), target);
-      } else {
-        return Status::InvalidArgument(errmsg, target);
-      }
+      return factory(target, guard, errmsg);
     } else {
-      return Status::NotSupported(std::string("Could not load ") + T::Type(),
-                                  target);
+      *errmsg = std::string("Could not load ") + T::Type();
+      return nullptr;
     }
   }
+
   // Creates a new unique T using the input factory functions.
   // Returns OK if a new unique T was successfully created
   // Returns NotSupported if the type/target could not be created
@@ -345,13 +366,11 @@ class ObjectRegistry {
   template <typename T>
   Status NewUniqueObject(const std::string& target,
                          std::unique_ptr<T>* result) {
-    T* ptr = nullptr;
-    std::unique_ptr<T> guard;
-    Status s = NewObject(target, &ptr, &guard);
-    if (!s.ok()) {
-      return s;
-    } else if (guard) {
-      result->reset(guard.release());
+    std::string errmsg;
+    T* ptr = NewObject(target, result, &errmsg);
+    if (ptr == nullptr) {
+      return Status::NotSupported(errmsg, target);
+    } else if (*result) {
       return Status::OK();
     } else {
       return Status::InvalidArgument(std::string("Cannot make a unique ") +
@@ -368,11 +387,11 @@ class ObjectRegistry {
   template <typename T>
   Status NewSharedObject(const std::string& target,
                          std::shared_ptr<T>* result) {
+    std::string errmsg;
     std::unique_ptr<T> guard;
-    T* ptr = nullptr;
-    Status s = NewObject(target, &ptr, &guard);
-    if (!s.ok()) {
-      return s;
+    T* ptr = NewObject(target, &guard, &errmsg);
+    if (ptr == nullptr) {
+      return Status::NotSupported(errmsg, target);
     } else if (guard) {
       result->reset(guard.release());
       return Status::OK();
@@ -390,11 +409,11 @@ class ObjectRegistry {
   //                      (meaning it is managed by a unique ptr)
   template <typename T>
   Status NewStaticObject(const std::string& target, T** result) {
+    std::string errmsg;
     std::unique_ptr<T> guard;
-    T* ptr = nullptr;
-    Status s = NewObject(target, &ptr, &guard);
-    if (!s.ok()) {
-      return s;
+    T* ptr = NewObject(target, &guard, &errmsg);
+    if (ptr == nullptr) {
+      return Status::NotSupported(errmsg, target);
     } else if (guard.get()) {
       return Status::InvalidArgument(std::string("Cannot make a static ") +
                                          T::Type() + " from a guarded one ",
@@ -510,25 +529,13 @@ class ObjectRegistry {
     }
   }
 
-  // Returns the number of factories registered for this library
-  // for the input type.
-  // @param num_types returns how many unique types are registered.
-  size_t GetFactoryCount(const std::string& type) const;
-
-  // Returns the names of registered factories for the input type.
-  // names is updated to include the names for the type
-  void GetFactoryNames(const std::string& type,
-                       std::vector<std::string>* names) const;
-
-  void GetFactoryTypes(std::unordered_set<std::string>* types) const;
-
   // Dump the contents of the registry to the logger
   void Dump(Logger* logger) const;
 
-  // Invokes the input function to retrieve the properties for this plugin.
-  int RegisterPlugin(const std::string& name, const RegistrarFunc& func);
-
  private:
+  explicit ObjectRegistry(const std::shared_ptr<ObjectLibrary>& library) {
+    libraries_.push_back(library);
+  }
   static std::string ToManagedObjectKey(const std::string& type,
                                         const std::string& id) {
     return type + "://" + id;
@@ -574,8 +581,6 @@ class ObjectRegistry {
   // The libraries are searched in reverse order (back to front) when
   // searching for entries.
   std::vector<std::shared_ptr<ObjectLibrary>> libraries_;
-  std::vector<std::string> plugins_;
-  static std::unordered_map<std::string, RegistrarFunc> builtins_;
   std::map<std::string, std::weak_ptr<Customizable>> managed_objects_;
   std::shared_ptr<ObjectRegistry> parent_;
   mutable std::mutex objects_mutex_;  // Mutex for managed objects

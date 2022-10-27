@@ -65,8 +65,6 @@ class ProtectionInfo {
                                   const SliceParts& value,
                                   ValueType op_type) const;
 
-  T GetVal() const { return val_; }
-
  private:
   friend class ProtectionInfoKVO<T>;
   friend class ProtectionInfoKVOS<T>;
@@ -89,6 +87,7 @@ class ProtectionInfo {
     static_assert(sizeof(ProtectionInfo<T>) == sizeof(T), "");
   }
 
+  T GetVal() const { return val_; }
   void SetVal(T val) { val_ = val; }
 
   T val_ = 0;
@@ -113,8 +112,6 @@ class ProtectionInfoKVO {
   void UpdateV(const SliceParts& old_value, const SliceParts& new_value);
   void UpdateO(ValueType old_op_type, ValueType new_op_type);
 
-  T GetVal() const { return info_.GetVal(); }
-
  private:
   friend class ProtectionInfo<T>;
   friend class ProtectionInfoKVOS<T>;
@@ -124,6 +121,7 @@ class ProtectionInfoKVO {
     static_assert(sizeof(ProtectionInfoKVO<T>) == sizeof(T), "");
   }
 
+  T GetVal() const { return info_.GetVal(); }
   void SetVal(T val) { info_.SetVal(val); }
 
   ProtectionInfo<T> info_;
@@ -154,8 +152,6 @@ class ProtectionInfoKVOC {
   void UpdateC(ColumnFamilyId old_column_family_id,
                ColumnFamilyId new_column_family_id);
 
-  T GetVal() const { return kvo_.GetVal(); }
-
  private:
   friend class ProtectionInfoKVO<T>;
 
@@ -163,6 +159,7 @@ class ProtectionInfoKVOC {
     static_assert(sizeof(ProtectionInfoKVOC<T>) == sizeof(T), "");
   }
 
+  T GetVal() const { return kvo_.GetVal(); }
   void SetVal(T val) { kvo_.SetVal(val); }
 
   ProtectionInfoKVO<T> kvo_;
@@ -193,8 +190,6 @@ class ProtectionInfoKVOS {
   void UpdateS(SequenceNumber old_sequence_number,
                SequenceNumber new_sequence_number);
 
-  T GetVal() const { return kvo_.GetVal(); }
-
  private:
   friend class ProtectionInfoKVO<T>;
 
@@ -202,6 +197,7 @@ class ProtectionInfoKVOS {
     static_assert(sizeof(ProtectionInfoKVOS<T>) == sizeof(T), "");
   }
 
+  T GetVal() const { return kvo_.GetVal(); }
   void SetVal(T val) { kvo_.SetVal(val); }
 
   ProtectionInfoKVO<T> kvo_;

@@ -11,7 +11,6 @@
 #include <memory>
 
 #include "include/org_rocksdb_AbstractEventListener.h"
-#include "rocksjni/cplusplus_to_java_convert.h"
 #include "rocksjni/event_listener_jnicallback.h"
 #include "rocksjni/portal.h"
 
@@ -29,7 +28,7 @@ jlong Java_org_rocksdb_AbstractEventListener_createNewEventListener(
       new std::shared_ptr<ROCKSDB_NAMESPACE::EventListener>(
           new ROCKSDB_NAMESPACE::EventListenerJniCallback(
               env, jobj, enabled_event_callbacks));
-  return GET_CPLUSPLUS_POINTER(sptr_event_listener);
+  return reinterpret_cast<jlong>(sptr_event_listener);
 }
 
 /*

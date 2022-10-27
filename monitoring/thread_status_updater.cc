@@ -16,8 +16,7 @@ namespace ROCKSDB_NAMESPACE {
 
 #ifdef ROCKSDB_USING_THREAD_STATUS
 
-thread_local ThreadStatusData* ThreadStatusUpdater::thread_status_data_ =
-    nullptr;
+__thread ThreadStatusData* ThreadStatusUpdater::thread_status_data_ = nullptr;
 
 void ThreadStatusUpdater::RegisterThread(ThreadStatus::ThreadType ttype,
                                          uint64_t thread_id) {

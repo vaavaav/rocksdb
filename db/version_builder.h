@@ -25,7 +25,6 @@ class InternalStats;
 class Version;
 class VersionSet;
 class ColumnFamilyData;
-class CacheReservationManager;
 
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
@@ -34,9 +33,7 @@ class VersionBuilder {
  public:
   VersionBuilder(const FileOptions& file_options,
                  const ImmutableCFOptions* ioptions, TableCache* table_cache,
-                 VersionStorageInfo* base_vstorage, VersionSet* version_set,
-                 std::shared_ptr<CacheReservationManager>
-                     file_metadata_cache_res_mgr = nullptr);
+                 VersionStorageInfo* base_vstorage, VersionSet* version_set);
   ~VersionBuilder();
 
   bool CheckConsistencyForNumLevels();

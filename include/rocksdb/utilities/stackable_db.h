@@ -80,30 +80,12 @@ class StackableDB : public DB {
                      const Slice& val) override {
     return db_->Put(options, column_family, key, val);
   }
-  Status Put(const WriteOptions& options, ColumnFamilyHandle* column_family,
-             const Slice& key, const Slice& ts, const Slice& val) override {
-    return db_->Put(options, column_family, key, ts, val);
-  }
-
-  using DB::PutEntity;
-  Status PutEntity(const WriteOptions& options,
-                   ColumnFamilyHandle* column_family, const Slice& key,
-                   const WideColumns& columns) override {
-    return db_->PutEntity(options, column_family, key, columns);
-  }
 
   using DB::Get;
   virtual Status Get(const ReadOptions& options,
                      ColumnFamilyHandle* column_family, const Slice& key,
                      PinnableSlice* value) override {
     return db_->Get(options, column_family, key, value);
-  }
-
-  using DB::GetEntity;
-  Status GetEntity(const ReadOptions& options,
-                   ColumnFamilyHandle* column_family, const Slice& key,
-                   PinnableWideColumns* columns) override {
-    return db_->GetEntity(options, column_family, key, columns);
   }
 
   using DB::GetMergeOperands;
@@ -184,28 +166,12 @@ class StackableDB : public DB {
                         const Slice& key) override {
     return db_->Delete(wopts, column_family, key);
   }
-  Status Delete(const WriteOptions& wopts, ColumnFamilyHandle* column_family,
-                const Slice& key, const Slice& ts) override {
-    return db_->Delete(wopts, column_family, key, ts);
-  }
 
   using DB::SingleDelete;
   virtual Status SingleDelete(const WriteOptions& wopts,
                               ColumnFamilyHandle* column_family,
                               const Slice& key) override {
     return db_->SingleDelete(wopts, column_family, key);
-  }
-  Status SingleDelete(const WriteOptions& wopts,
-                      ColumnFamilyHandle* column_family, const Slice& key,
-                      const Slice& ts) override {
-    return db_->SingleDelete(wopts, column_family, key, ts);
-  }
-
-  using DB::DeleteRange;
-  Status DeleteRange(const WriteOptions& wopts,
-                     ColumnFamilyHandle* column_family, const Slice& start_key,
-                     const Slice& end_key) override {
-    return db_->DeleteRange(wopts, column_family, start_key, end_key);
   }
 
   using DB::Merge;
@@ -404,14 +370,8 @@ class StackableDB : public DB {
 
   using DB::StartBlockCacheTrace;
   Status StartBlockCacheTrace(
-      const TraceOptions& trace_options,
+      const TraceOptions& options,
       std::unique_ptr<TraceWriter>&& trace_writer) override {
-    return db_->StartBlockCacheTrace(trace_options, std::move(trace_writer));
-  }
-
-  Status StartBlockCacheTrace(
-      const BlockCacheTraceOptions& options,
-      std::unique_ptr<BlockCacheTraceWriter>&& trace_writer) override {
     return db_->StartBlockCacheTrace(options, std::move(trace_writer));
   }
 
@@ -452,6 +412,11 @@ class StackableDB : public DB {
 
   virtual SequenceNumber GetLatestSequenceNumber() const override {
     return db_->GetLatestSequenceNumber();
+  }
+
+  virtual bool SetPreserveDeletesSequenceNumber(
+      SequenceNumber seqnum) override {
+    return db_->SetPreserveDeletesSequenceNumber(seqnum);
   }
 
   Status IncreaseFullHistoryTsLow(ColumnFamilyHandle* column_family,

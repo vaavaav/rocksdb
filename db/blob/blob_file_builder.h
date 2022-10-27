@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "rocksdb/advanced_options.h"
 #include "rocksdb/compression_type.h"
 #include "rocksdb/env.h"
 #include "rocksdb/rocksdb_namespace.h"
@@ -36,8 +35,7 @@ class BlobFileBuilder {
   BlobFileBuilder(VersionSet* versions, FileSystem* fs,
                   const ImmutableOptions* immutable_options,
                   const MutableCFOptions* mutable_cf_options,
-                  const FileOptions* file_options, std::string db_id,
-                  std::string db_session_id, int job_id,
+                  const FileOptions* file_options, int job_id,
                   uint32_t column_family_id,
                   const std::string& column_family_name,
                   Env::IOPriority io_priority,
@@ -51,8 +49,7 @@ class BlobFileBuilder {
   BlobFileBuilder(std::function<uint64_t()> file_number_generator,
                   FileSystem* fs, const ImmutableOptions* immutable_options,
                   const MutableCFOptions* mutable_cf_options,
-                  const FileOptions* file_options, std::string db_id,
-                  std::string db_session_id, int job_id,
+                  const FileOptions* file_options, int job_id,
                   uint32_t column_family_id,
                   const std::string& column_family_name,
                   Env::IOPriority io_priority,
@@ -81,19 +78,13 @@ class BlobFileBuilder {
   Status CloseBlobFile();
   Status CloseBlobFileIfNeeded();
 
-  Status PutBlobIntoCacheIfNeeded(const Slice& blob, uint64_t blob_file_number,
-                                  uint64_t blob_offset) const;
-
   std::function<uint64_t()> file_number_generator_;
   FileSystem* fs_;
   const ImmutableOptions* immutable_options_;
   uint64_t min_blob_size_;
   uint64_t blob_file_size_;
   CompressionType blob_compression_type_;
-  PrepopulateBlobCache prepopulate_blob_cache_;
   const FileOptions* file_options_;
-  const std::string db_id_;
-  const std::string db_session_id_;
   int job_id_;
   uint32_t column_family_id_;
   std::string column_family_name_;

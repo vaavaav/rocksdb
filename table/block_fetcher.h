@@ -71,8 +71,6 @@ class BlockFetcher {
   }
 
   IOStatus ReadBlockContents();
-  IOStatus ReadAsyncBlockContents();
-
   inline CompressionType get_compression_type() const {
     return compression_type_;
   }
@@ -128,7 +126,7 @@ class BlockFetcher {
   bool TryGetUncompressBlockFromPersistentCache();
   // return true if found
   bool TryGetFromPrefetchBuffer();
-  bool TryGetSerializedBlockFromPersistentCache();
+  bool TryGetCompressedBlockFromPersistentCache();
   void PrepareBufferForBlockFromFile();
   // Copy content from used_buf_ to new heap_buf_.
   void CopyBufferToHeapBuf();

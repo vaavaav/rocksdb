@@ -7,26 +7,137 @@
 
 #include "db/db_test_util.h"
 #include "port/stack_trace.h"
-#include "table/unique_id_impl.h"
 
 namespace ROCKSDB_NAMESPACE {
 
-class MyTestCompactionService : public CompactionService {
+class TestCompactionServiceBase {
  public:
-  MyTestCompactionService(
-      std::string db_path, Options& options,
-      std::shared_ptr<Statistics>& statistics,
-      std::vector<std::shared_ptr<EventListener>>& listeners,
-      std::vector<std::shared_ptr<TablePropertiesCollectorFactory>>
-          table_properties_collector_factories)
+  virtual int GetCompactionNum() = 0;
+
+  void OverrideStartStatus(CompactionServiceJobStatus s) {
+    is_override_start_status = true;
+    override_start_status = s;
+  }
+
+  void OverrideWaitStatus(CompactionServiceJobStatus s) {
+    is_override_wait_status = true;
+    override_wait_status = s;
+  }
+
+  void OverrideWaitResult(std::string str) {
+    is_override_wait_result = true;
+    override_wait_result = std::move(str);
+  }
+
+  void ResetOverride() {
+    is_override_wait_result = false;
+    is_override_start_status = false;
+    is_override_wait_status = false;
+  }
+
+  virtual ~TestCompactionServiceBase() = default;
+
+ protected:
+  bool is_override_start_status = false;
+  CompactionServiceJobStatus override_start_status =
+      CompactionServiceJobStatus::kFailure;
+  bool is_override_wait_status = false;
+  CompactionServiceJobStatus override_wait_status =
+      CompactionServiceJobStatus::kFailure;
+  bool is_override_wait_result = false;
+  std::string override_wait_result;
+};
+
+class MyTestCompactionServiceLegacy : public CompactionService,
+                                      public TestCompactionServiceBase {
+ public:
+  MyTestCompactionServiceLegacy(std::string db_path, Options& options,
+                                std::shared_ptr<Statistics>& statistics)
+      : db_path_(std::move(db_path)),
+        options_(options),
+        statistics_(statistics) {}
+
+  static const char* kClassName() { return "MyTestCompactionServiceLegacy"; }
+
+  const char* Name() const override { return kClassName(); }
+
+  CompactionServiceJobStatus Start(const std::string& compaction_service_input,
+                                   uint64_t job_id) override {
+    InstrumentedMutexLock l(&mutex_);
+    jobs_.emplace(job_id, compaction_service_input);
+    CompactionServiceJobStatus s = CompactionServiceJobStatus::kSuccess;
+    if (is_override_start_status) {
+      return override_start_status;
+    }
+    return s;
+  }
+
+  CompactionServiceJobStatus WaitForComplete(
+      uint64_t job_id, std::string* compaction_service_result) override {
+    std::string compaction_input;
+    {
+      InstrumentedMutexLock l(&mutex_);
+      auto i = jobs_.find(job_id);
+      if (i == jobs_.end()) {
+        return CompactionServiceJobStatus::kFailure;
+      }
+      compaction_input = std::move(i->second);
+      jobs_.erase(i);
+    }
+
+    if (is_override_wait_status) {
+      return override_wait_status;
+    }
+
+    CompactionServiceOptionsOverride options_override;
+    options_override.env = options_.env;
+    options_override.file_checksum_gen_factory =
+        options_.file_checksum_gen_factory;
+    options_override.comparator = options_.comparator;
+    options_override.merge_operator = options_.merge_operator;
+    options_override.compaction_filter = options_.compaction_filter;
+    options_override.compaction_filter_factory =
+        options_.compaction_filter_factory;
+    options_override.prefix_extractor = options_.prefix_extractor;
+    options_override.table_factory = options_.table_factory;
+    options_override.sst_partitioner_factory = options_.sst_partitioner_factory;
+    options_override.statistics = statistics_;
+
+    Status s = DB::OpenAndCompact(
+        db_path_, db_path_ + "/" + ROCKSDB_NAMESPACE::ToString(job_id),
+        compaction_input, compaction_service_result, options_override);
+    if (is_override_wait_result) {
+      *compaction_service_result = override_wait_result;
+    }
+    compaction_num_.fetch_add(1);
+    if (s.ok()) {
+      return CompactionServiceJobStatus::kSuccess;
+    } else {
+      return CompactionServiceJobStatus::kFailure;
+    }
+  }
+
+  int GetCompactionNum() override { return compaction_num_.load(); }
+
+ private:
+  InstrumentedMutex mutex_;
+  std::atomic_int compaction_num_{0};
+  std::map<uint64_t, std::string> jobs_;
+  const std::string db_path_;
+  Options options_;
+  std::shared_ptr<Statistics> statistics_;
+};
+
+class MyTestCompactionService : public CompactionService,
+                                public TestCompactionServiceBase {
+ public:
+  MyTestCompactionService(std::string db_path, Options& options,
+                          std::shared_ptr<Statistics>& statistics)
       : db_path_(std::move(db_path)),
         options_(options),
         statistics_(statistics),
         start_info_("na", "na", "na", 0, Env::TOTAL),
-        wait_info_("na", "na", "na", 0, Env::TOTAL),
-        listeners_(listeners),
-        table_properties_collector_factories_(
-            std::move(table_properties_collector_factories)) {}
+        wait_info_("na", "na", "na", 0, Env::TOTAL) {}
 
   static const char* kClassName() { return "MyTestCompactionService"; }
 
@@ -40,8 +151,8 @@ class MyTestCompactionService : public CompactionService {
     assert(info.db_name == db_path_);
     jobs_.emplace(info.job_id, compaction_service_input);
     CompactionServiceJobStatus s = CompactionServiceJobStatus::kSuccess;
-    if (is_override_start_status_) {
-      return override_start_status_;
+    if (is_override_start_status) {
+      return override_start_status;
     }
     return s;
   }
@@ -62,8 +173,8 @@ class MyTestCompactionService : public CompactionService {
       jobs_.erase(i);
     }
 
-    if (is_override_wait_status_) {
-      return override_wait_status_;
+    if (is_override_wait_status) {
+      return override_wait_status;
     }
 
     CompactionServiceOptionsOverride options_override;
@@ -79,23 +190,12 @@ class MyTestCompactionService : public CompactionService {
     options_override.table_factory = options_.table_factory;
     options_override.sst_partitioner_factory = options_.sst_partitioner_factory;
     options_override.statistics = statistics_;
-    if (!listeners_.empty()) {
-      options_override.listeners = listeners_;
-    }
-
-    if (!table_properties_collector_factories_.empty()) {
-      options_override.table_properties_collector_factories =
-          table_properties_collector_factories_;
-    }
-
-    OpenAndCompactOptions options;
-    options.canceled = &canceled_;
 
     Status s = DB::OpenAndCompact(
-        options, db_path_, db_path_ + "/" + std::to_string(info.job_id),
+        db_path_, db_path_ + "/" + ROCKSDB_NAMESPACE::ToString(info.job_id),
         compaction_input, compaction_service_result, options_override);
-    if (is_override_wait_result_) {
-      *compaction_service_result = override_wait_result_;
+    if (is_override_wait_result) {
+      *compaction_service_result = override_wait_result;
     }
     compaction_num_.fetch_add(1);
     if (s.ok()) {
@@ -105,33 +205,10 @@ class MyTestCompactionService : public CompactionService {
     }
   }
 
-  int GetCompactionNum() { return compaction_num_.load(); }
+  int GetCompactionNum() override { return compaction_num_.load(); }
 
   CompactionServiceJobInfo GetCompactionInfoForStart() { return start_info_; }
   CompactionServiceJobInfo GetCompactionInfoForWait() { return wait_info_; }
-
-  void OverrideStartStatus(CompactionServiceJobStatus s) {
-    is_override_start_status_ = true;
-    override_start_status_ = s;
-  }
-
-  void OverrideWaitStatus(CompactionServiceJobStatus s) {
-    is_override_wait_status_ = true;
-    override_wait_status_ = s;
-  }
-
-  void OverrideWaitResult(std::string str) {
-    is_override_wait_result_ = true;
-    override_wait_result_ = std::move(str);
-  }
-
-  void ResetOverride() {
-    is_override_wait_result_ = false;
-    is_override_start_status_ = false;
-    is_override_wait_status_ = false;
-  }
-
-  void SetCanceled(bool canceled) { canceled_ = canceled; }
 
  private:
   InstrumentedMutex mutex_;
@@ -142,21 +219,17 @@ class MyTestCompactionService : public CompactionService {
   std::shared_ptr<Statistics> statistics_;
   CompactionServiceJobInfo start_info_;
   CompactionServiceJobInfo wait_info_;
-  bool is_override_start_status_ = false;
-  CompactionServiceJobStatus override_start_status_ =
-      CompactionServiceJobStatus::kFailure;
-  bool is_override_wait_status_ = false;
-  CompactionServiceJobStatus override_wait_status_ =
-      CompactionServiceJobStatus::kFailure;
-  bool is_override_wait_result_ = false;
-  std::string override_wait_result_;
-  std::vector<std::shared_ptr<EventListener>> listeners_;
-  std::vector<std::shared_ptr<TablePropertiesCollectorFactory>>
-      table_properties_collector_factories_;
-  std::atomic_bool canceled_{false};
 };
 
-class CompactionServiceTest : public DBTestBase {
+// This is only for listing test classes
+enum TestCompactionServiceType {
+  MyTestCompactionServiceType,
+  MyTestCompactionServiceLegacyType,
+};
+
+class CompactionServiceTest
+    : public DBTestBase,
+      public testing::WithParamInterface<TestCompactionServiceType> {
  public:
   explicit CompactionServiceTest()
       : DBTestBase("compaction_service_test", true) {}
@@ -167,10 +240,19 @@ class CompactionServiceTest : public DBTestBase {
     primary_statistics_ = CreateDBStatistics();
     options->statistics = primary_statistics_;
     compactor_statistics_ = CreateDBStatistics();
-
-    compaction_service_ = std::make_shared<MyTestCompactionService>(
-        dbname_, *options, compactor_statistics_, remote_listeners,
-        remote_table_properties_collector_factories);
+    TestCompactionServiceType cs_type = GetParam();
+    switch (cs_type) {
+      case MyTestCompactionServiceType:
+        compaction_service_ = std::make_shared<MyTestCompactionService>(
+            dbname_, *options, compactor_statistics_);
+        break;
+      case MyTestCompactionServiceLegacyType:
+        compaction_service_ = std::make_shared<MyTestCompactionServiceLegacy>(
+            dbname_, *options, compactor_statistics_);
+        break;
+      default:
+        assert(false);
+    }
     options->compaction_service = compaction_service_;
     DestroyAndReopen(*options);
   }
@@ -179,9 +261,9 @@ class CompactionServiceTest : public DBTestBase {
 
   Statistics* GetPrimaryStatistics() { return primary_statistics_.get(); }
 
-  MyTestCompactionService* GetCompactionService() {
+  TestCompactionServiceBase* GetCompactionService() {
     CompactionService* cs = compaction_service_.get();
-    return static_cast_with_check<MyTestCompactionService>(cs);
+    return dynamic_cast<TestCompactionServiceBase*>(cs);
   }
 
   void GenerateTestData() {
@@ -189,7 +271,7 @@ class CompactionServiceTest : public DBTestBase {
     for (int i = 0; i < 20; i++) {
       for (int j = 0; j < 10; j++) {
         int key_id = i * 10 + j;
-        ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
+        ASSERT_OK(Put(Key(key_id), "value" + ToString(key_id)));
       }
       ASSERT_OK(Flush());
     }
@@ -199,7 +281,7 @@ class CompactionServiceTest : public DBTestBase {
     for (int i = 0; i < 10; i++) {
       for (int j = 0; j < 10; j++) {
         int key_id = i * 20 + j * 2;
-        ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
+        ASSERT_OK(Put(Key(key_id), "value_new" + ToString(key_id)));
       }
       ASSERT_OK(Flush());
     }
@@ -211,16 +293,12 @@ class CompactionServiceTest : public DBTestBase {
     for (int i = 0; i < 200; i++) {
       auto result = Get(Key(i));
       if (i % 2) {
-        ASSERT_EQ(result, "value" + std::to_string(i));
+        ASSERT_EQ(result, "value" + ToString(i));
       } else {
-        ASSERT_EQ(result, "value_new" + std::to_string(i));
+        ASSERT_EQ(result, "value_new" + ToString(i));
       }
     }
   }
-
-  std::vector<std::shared_ptr<EventListener>> remote_listeners;
-  std::vector<std::shared_ptr<TablePropertiesCollectorFactory>>
-      remote_table_properties_collector_factories;
 
  private:
   std::shared_ptr<Statistics> compactor_statistics_;
@@ -228,7 +306,7 @@ class CompactionServiceTest : public DBTestBase {
   std::shared_ptr<CompactionService> compaction_service_;
 };
 
-TEST_F(CompactionServiceTest, BasicCompactions) {
+TEST_P(CompactionServiceTest, BasicCompactions) {
   Options options = CurrentOptions();
   ReopenWithCompactionService(&options);
 
@@ -238,7 +316,7 @@ TEST_F(CompactionServiceTest, BasicCompactions) {
   for (int i = 0; i < 20; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 10 + j;
-      ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -246,7 +324,7 @@ TEST_F(CompactionServiceTest, BasicCompactions) {
   for (int i = 0; i < 10; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 20 + j * 2;
-      ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value_new" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -256,9 +334,9 @@ TEST_F(CompactionServiceTest, BasicCompactions) {
   for (int i = 0; i < 200; i++) {
     auto result = Get(Key(i));
     if (i % 2) {
-      ASSERT_EQ(result, "value" + std::to_string(i));
+      ASSERT_EQ(result, "value" + ToString(i));
     } else {
-      ASSERT_EQ(result, "value_new" + std::to_string(i));
+      ASSERT_EQ(result, "value_new" + ToString(i));
     }
   }
   auto my_cs = GetCompactionService();
@@ -295,7 +373,7 @@ TEST_F(CompactionServiceTest, BasicCompactions) {
   for (int i = 0; i < 10; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 20 + j * 2;
-      s = Put(Key(key_id), "value_new" + std::to_string(key_id));
+      s = Put(Key(key_id), "value_new" + ToString(key_id));
       if (s.IsAborted()) {
         break;
       }
@@ -313,22 +391,9 @@ TEST_F(CompactionServiceTest, BasicCompactions) {
     }
   }
   ASSERT_TRUE(s.IsAborted());
-
-  // Test re-open and successful unique id verification
-  std::atomic_int verify_passed{0};
-  SyncPoint::GetInstance()->SetCallBack(
-      "BlockBasedTable::Open::PassedVerifyUniqueId", [&](void* arg) {
-        // override job status
-        auto id = static_cast<UniqueId64x2*>(arg);
-        assert(*id != kNullUniqueId64x2);
-        verify_passed++;
-      });
-  Reopen(options);
-  ASSERT_GT(verify_passed, 0);
-  Close();
 }
 
-TEST_F(CompactionServiceTest, ManualCompaction) {
+TEST_P(CompactionServiceTest, ManualCompaction) {
   Options options = CurrentOptions();
   options.disable_auto_compactions = true;
   ReopenWithCompactionService(&options);
@@ -365,52 +430,7 @@ TEST_F(CompactionServiceTest, ManualCompaction) {
   VerifyTestData();
 }
 
-TEST_F(CompactionServiceTest, CancelCompactionOnRemoteSide) {
-  Options options = CurrentOptions();
-  options.disable_auto_compactions = true;
-  ReopenWithCompactionService(&options);
-  GenerateTestData();
-
-  auto my_cs = GetCompactionService();
-
-  std::string start_str = Key(15);
-  std::string end_str = Key(45);
-  Slice start(start_str);
-  Slice end(end_str);
-  uint64_t comp_num = my_cs->GetCompactionNum();
-
-  // Test cancel compaction at the beginning
-  my_cs->SetCanceled(true);
-  auto s = db_->CompactRange(CompactRangeOptions(), &start, &end);
-  ASSERT_TRUE(s.IsIncomplete());
-  // compaction number is not increased
-  ASSERT_GE(my_cs->GetCompactionNum(), comp_num);
-  VerifyTestData();
-
-  // Test cancel compaction in progress
-  ReopenWithCompactionService(&options);
-  GenerateTestData();
-  my_cs = GetCompactionService();
-  my_cs->SetCanceled(false);
-
-  std::atomic_bool cancel_issued{false};
-  SyncPoint::GetInstance()->SetCallBack("CompactionJob::Run():Inprogress",
-                                        [&](void* /*arg*/) {
-                                          cancel_issued = true;
-                                          my_cs->SetCanceled(true);
-                                        });
-
-  SyncPoint::GetInstance()->EnableProcessing();
-
-  s = db_->CompactRange(CompactRangeOptions(), &start, &end);
-  ASSERT_TRUE(s.IsIncomplete());
-  ASSERT_TRUE(cancel_issued);
-  // compaction number is not increased
-  ASSERT_GE(my_cs->GetCompactionNum(), comp_num);
-  VerifyTestData();
-}
-
-TEST_F(CompactionServiceTest, FailedToStart) {
+TEST_P(CompactionServiceTest, FailedToStart) {
   Options options = CurrentOptions();
   options.disable_auto_compactions = true;
   ReopenWithCompactionService(&options);
@@ -428,7 +448,7 @@ TEST_F(CompactionServiceTest, FailedToStart) {
   ASSERT_TRUE(s.IsIncomplete());
 }
 
-TEST_F(CompactionServiceTest, InvalidResult) {
+TEST_P(CompactionServiceTest, InvalidResult) {
   Options options = CurrentOptions();
   options.disable_auto_compactions = true;
   ReopenWithCompactionService(&options);
@@ -446,7 +466,7 @@ TEST_F(CompactionServiceTest, InvalidResult) {
   ASSERT_FALSE(s.ok());
 }
 
-TEST_F(CompactionServiceTest, SubCompaction) {
+TEST_P(CompactionServiceTest, SubCompaction) {
   Options options = CurrentOptions();
   options.max_subcompactions = 10;
   options.target_file_size_base = 1 << 10;  // 1KB
@@ -485,7 +505,7 @@ class PartialDeleteCompactionFilter : public CompactionFilter {
   const char* Name() const override { return "PartialDeleteCompactionFilter"; }
 };
 
-TEST_F(CompactionServiceTest, CompactionFilter) {
+TEST_P(CompactionServiceTest, CompactionFilter) {
   Options options = CurrentOptions();
   std::unique_ptr<CompactionFilter> delete_comp_filter(
       new PartialDeleteCompactionFilter());
@@ -495,7 +515,7 @@ TEST_F(CompactionServiceTest, CompactionFilter) {
   for (int i = 0; i < 20; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 10 + j;
-      ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -503,7 +523,7 @@ TEST_F(CompactionServiceTest, CompactionFilter) {
   for (int i = 0; i < 10; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 20 + j * 2;
-      ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value_new" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -517,16 +537,16 @@ TEST_F(CompactionServiceTest, CompactionFilter) {
     if (i > 5 && i <= 105) {
       ASSERT_EQ(result, "NOT_FOUND");
     } else if (i % 2) {
-      ASSERT_EQ(result, "value" + std::to_string(i));
+      ASSERT_EQ(result, "value" + ToString(i));
     } else {
-      ASSERT_EQ(result, "value_new" + std::to_string(i));
+      ASSERT_EQ(result, "value_new" + ToString(i));
     }
   }
   auto my_cs = GetCompactionService();
   ASSERT_GE(my_cs->GetCompactionNum(), 1);
 }
 
-TEST_F(CompactionServiceTest, Snapshot) {
+TEST_P(CompactionServiceTest, Snapshot) {
   Options options = CurrentOptions();
   ReopenWithCompactionService(&options);
 
@@ -547,7 +567,7 @@ TEST_F(CompactionServiceTest, Snapshot) {
   db_->ReleaseSnapshot(s1);
 }
 
-TEST_F(CompactionServiceTest, ConcurrentCompaction) {
+TEST_P(CompactionServiceTest, ConcurrentCompaction) {
   Options options = CurrentOptions();
   options.level0_file_num_compaction_trigger = 100;
   options.max_background_jobs = 20;
@@ -559,7 +579,7 @@ TEST_F(CompactionServiceTest, ConcurrentCompaction) {
 
   std::vector<std::thread> threads;
   for (const auto& file : meta.levels[1].files) {
-    threads.emplace_back(std::thread([&]() {
+    threads.push_back(std::thread([&]() {
       std::string fname = file.db_path + "/" + file.name;
       ASSERT_OK(db_->CompactFiles(CompactionOptions(), {fname}, 2));
     }));
@@ -574,9 +594,9 @@ TEST_F(CompactionServiceTest, ConcurrentCompaction) {
   for (int i = 0; i < 200; i++) {
     auto result = Get(Key(i));
     if (i % 2) {
-      ASSERT_EQ(result, "value" + std::to_string(i));
+      ASSERT_EQ(result, "value" + ToString(i));
     } else {
-      ASSERT_EQ(result, "value_new" + std::to_string(i));
+      ASSERT_EQ(result, "value_new" + ToString(i));
     }
   }
   auto my_cs = GetCompactionService();
@@ -584,14 +604,19 @@ TEST_F(CompactionServiceTest, ConcurrentCompaction) {
   ASSERT_EQ(FilesPerLevel(), "0,0,10");
 }
 
-TEST_F(CompactionServiceTest, CompactionInfo) {
+TEST_P(CompactionServiceTest, CompactionInfo) {
+  // only test compaction info for new compaction service interface
+  if (GetParam() != MyTestCompactionServiceType) {
+    return;
+  }
+
   Options options = CurrentOptions();
   ReopenWithCompactionService(&options);
 
   for (int i = 0; i < 20; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 10 + j;
-      ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -599,7 +624,7 @@ TEST_F(CompactionServiceTest, CompactionInfo) {
   for (int i = 0; i < 10; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 20 + j * 2;
-      ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value_new" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -644,7 +669,7 @@ TEST_F(CompactionServiceTest, CompactionInfo) {
   for (int i = 0; i < 20; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 10 + j;
-      ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -652,7 +677,7 @@ TEST_F(CompactionServiceTest, CompactionInfo) {
   for (int i = 0; i < 4; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 20 + j * 2;
-      ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value_new" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -663,7 +688,7 @@ TEST_F(CompactionServiceTest, CompactionInfo) {
   ASSERT_EQ(Env::BOTTOM, info.priority);
 }
 
-TEST_F(CompactionServiceTest, FallbackLocalAuto) {
+TEST_P(CompactionServiceTest, FallbackLocalAuto) {
   Options options = CurrentOptions();
   ReopenWithCompactionService(&options);
 
@@ -680,7 +705,7 @@ TEST_F(CompactionServiceTest, FallbackLocalAuto) {
   for (int i = 0; i < 20; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 10 + j;
-      ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -688,7 +713,7 @@ TEST_F(CompactionServiceTest, FallbackLocalAuto) {
   for (int i = 0; i < 10; i++) {
     for (int j = 0; j < 10; j++) {
       int key_id = i * 20 + j * 2;
-      ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
+      ASSERT_OK(Put(Key(key_id), "value_new" + ToString(key_id)));
     }
     ASSERT_OK(Flush());
   }
@@ -698,9 +723,9 @@ TEST_F(CompactionServiceTest, FallbackLocalAuto) {
   for (int i = 0; i < 200; i++) {
     auto result = Get(Key(i));
     if (i % 2) {
-      ASSERT_EQ(result, "value" + std::to_string(i));
+      ASSERT_EQ(result, "value" + ToString(i));
     } else {
-      ASSERT_EQ(result, "value_new" + std::to_string(i));
+      ASSERT_EQ(result, "value_new" + ToString(i));
     }
   }
 
@@ -715,7 +740,7 @@ TEST_F(CompactionServiceTest, FallbackLocalAuto) {
   ASSERT_EQ(primary_statistics->getTickerCount(REMOTE_COMPACT_WRITE_BYTES), 0);
 }
 
-TEST_F(CompactionServiceTest, FallbackLocalManual) {
+TEST_P(CompactionServiceTest, FallbackLocalManual) {
   Options options = CurrentOptions();
   options.disable_auto_compactions = true;
   ReopenWithCompactionService(&options);
@@ -773,177 +798,11 @@ TEST_F(CompactionServiceTest, FallbackLocalManual) {
   VerifyTestData();
 }
 
-TEST_F(CompactionServiceTest, RemoteEventListener) {
-  class RemoteEventListenerTest : public EventListener {
-   public:
-    const char* Name() const override { return "RemoteEventListenerTest"; }
-
-    void OnSubcompactionBegin(const SubcompactionJobInfo& info) override {
-      auto result = on_going_compactions.emplace(info.job_id);
-      ASSERT_TRUE(result.second);  // make sure there's no duplication
-      compaction_num++;
-      EventListener::OnSubcompactionBegin(info);
-    }
-    void OnSubcompactionCompleted(const SubcompactionJobInfo& info) override {
-      auto num = on_going_compactions.erase(info.job_id);
-      ASSERT_TRUE(num == 1);  // make sure the compaction id exists
-      EventListener::OnSubcompactionCompleted(info);
-    }
-    void OnTableFileCreated(const TableFileCreationInfo& info) override {
-      ASSERT_EQ(on_going_compactions.count(info.job_id), 1);
-      file_created++;
-      EventListener::OnTableFileCreated(info);
-    }
-    void OnTableFileCreationStarted(
-        const TableFileCreationBriefInfo& info) override {
-      ASSERT_EQ(on_going_compactions.count(info.job_id), 1);
-      file_creation_started++;
-      EventListener::OnTableFileCreationStarted(info);
-    }
-
-    bool ShouldBeNotifiedOnFileIO() override {
-      file_io_notified++;
-      return EventListener::ShouldBeNotifiedOnFileIO();
-    }
-
-    std::atomic_uint64_t file_io_notified{0};
-    std::atomic_uint64_t file_creation_started{0};
-    std::atomic_uint64_t file_created{0};
-
-    std::set<int> on_going_compactions;  // store the job_id
-    std::atomic_uint64_t compaction_num{0};
-  };
-
-  auto listener = new RemoteEventListenerTest();
-  remote_listeners.emplace_back(listener);
-
-  Options options = CurrentOptions();
-  ReopenWithCompactionService(&options);
-
-  for (int i = 0; i < 20; i++) {
-    for (int j = 0; j < 10; j++) {
-      int key_id = i * 10 + j;
-      ASSERT_OK(Put(Key(key_id), "value" + std::to_string(key_id)));
-    }
-    ASSERT_OK(Flush());
-  }
-
-  for (int i = 0; i < 10; i++) {
-    for (int j = 0; j < 10; j++) {
-      int key_id = i * 20 + j * 2;
-      ASSERT_OK(Put(Key(key_id), "value_new" + std::to_string(key_id)));
-    }
-    ASSERT_OK(Flush());
-  }
-  ASSERT_OK(dbfull()->TEST_WaitForCompact());
-
-  // check the events are triggered
-  ASSERT_TRUE(listener->file_io_notified > 0);
-  ASSERT_TRUE(listener->file_creation_started > 0);
-  ASSERT_TRUE(listener->file_created > 0);
-  ASSERT_TRUE(listener->compaction_num > 0);
-  ASSERT_TRUE(listener->on_going_compactions.empty());
-
-  // verify result
-  for (int i = 0; i < 200; i++) {
-    auto result = Get(Key(i));
-    if (i % 2) {
-      ASSERT_EQ(result, "value" + std::to_string(i));
-    } else {
-      ASSERT_EQ(result, "value_new" + std::to_string(i));
-    }
-  }
-}
-
-TEST_F(CompactionServiceTest, TablePropertiesCollector) {
-  const static std::string kUserPropertyName = "TestCount";
-
-  class TablePropertiesCollectorTest : public TablePropertiesCollector {
-   public:
-    Status Finish(UserCollectedProperties* properties) override {
-      *properties = UserCollectedProperties{
-          {kUserPropertyName, std::to_string(count_)},
-      };
-      return Status::OK();
-    }
-
-    UserCollectedProperties GetReadableProperties() const override {
-      return UserCollectedProperties();
-    }
-
-    const char* Name() const override { return "TablePropertiesCollectorTest"; }
-
-    Status AddUserKey(const Slice& /*user_key*/, const Slice& /*value*/,
-                      EntryType /*type*/, SequenceNumber /*seq*/,
-                      uint64_t /*file_size*/) override {
-      count_++;
-      return Status::OK();
-    }
-
-   private:
-    uint32_t count_ = 0;
-  };
-
-  class TablePropertiesCollectorFactoryTest
-      : public TablePropertiesCollectorFactory {
-   public:
-    TablePropertiesCollector* CreateTablePropertiesCollector(
-        TablePropertiesCollectorFactory::Context /*context*/) override {
-      return new TablePropertiesCollectorTest();
-    }
-
-    const char* Name() const override {
-      return "TablePropertiesCollectorFactoryTest";
-    }
-  };
-
-  auto factory = new TablePropertiesCollectorFactoryTest();
-  remote_table_properties_collector_factories.emplace_back(factory);
-
-  const int kNumSst = 3;
-  const int kLevel0Trigger = 4;
-  Options options = CurrentOptions();
-  options.level0_file_num_compaction_trigger = kLevel0Trigger;
-  ReopenWithCompactionService(&options);
-
-  // generate a few SSTs locally which should not have user property
-  for (int i = 0; i < kNumSst; i++) {
-    for (int j = 0; j < 100; j++) {
-      ASSERT_OK(Put(Key(i * 10 + j), "value"));
-    }
-    ASSERT_OK(Flush());
-  }
-
-  TablePropertiesCollection fname_to_props;
-  ASSERT_OK(db_->GetPropertiesOfAllTables(&fname_to_props));
-  for (const auto& file_props : fname_to_props) {
-    auto properties = file_props.second->user_collected_properties;
-    auto it = properties.find(kUserPropertyName);
-    ASSERT_EQ(it, properties.end());
-  }
-
-  // trigger compaction
-  for (int i = kNumSst; i < kLevel0Trigger; i++) {
-    for (int j = 0; j < 100; j++) {
-      ASSERT_OK(Put(Key(i * 10 + j), "value"));
-    }
-    ASSERT_OK(Flush());
-  }
-  ASSERT_OK(dbfull()->TEST_WaitForCompact(true));
-
-  ASSERT_OK(db_->GetPropertiesOfAllTables(&fname_to_props));
-
-  bool has_user_property = false;
-  for (const auto& file_props : fname_to_props) {
-    auto properties = file_props.second->user_collected_properties;
-    auto it = properties.find(kUserPropertyName);
-    if (it != properties.end()) {
-      has_user_property = true;
-      ASSERT_GT(std::stoi(it->second), 0);
-    }
-  }
-  ASSERT_TRUE(has_user_property);
-}
+INSTANTIATE_TEST_CASE_P(
+    CompactionServiceTest, CompactionServiceTest,
+    ::testing::Values(
+        TestCompactionServiceType::MyTestCompactionServiceType,
+        TestCompactionServiceType::MyTestCompactionServiceLegacyType));
 
 }  // namespace ROCKSDB_NAMESPACE
 

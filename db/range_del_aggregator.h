@@ -38,15 +38,14 @@ class TruncatedRangeDelIterator {
 
   bool Valid() const;
 
-  void Next() { iter_->TopNext(); }
-  void Prev() { iter_->TopPrev(); }
+  void Next();
+  void Prev();
 
-  void InternalNext() { iter_->Next(); }
+  void InternalNext();
 
   // Seeks to the tombstone with the highest visible sequence number that covers
   // target (a user key). If no such tombstone exists, the position will be at
   // the earliest tombstone that ends after target.
-  // REQUIRES: target is a user key.
   void Seek(const Slice& target);
 
   // Seeks to the tombstone with the highest visible sequence number that covers
@@ -72,13 +71,6 @@ class TruncatedRangeDelIterator {
   }
 
   SequenceNumber seq() const { return iter_->seq(); }
-  Slice timestamp() const {
-    assert(icmp_->user_comparator()->timestamp_size());
-    return iter_->timestamp();
-  }
-  void SetTimestampUpperBound(const Slice* ts_upper_bound) {
-    iter_->SetTimestampUpperBound(ts_upper_bound);
-  }
 
   std::map<SequenceNumber, std::unique_ptr<TruncatedRangeDelIterator>>
   SplitBySnapshot(const std::vector<SequenceNumber>& snapshots);
@@ -289,11 +281,11 @@ class RangeDelAggregator {
       const InternalKey* smallest = nullptr,
       const InternalKey* largest = nullptr) = 0;
 
-  bool ShouldDelete(const Slice& ikey, RangeDelPositioningMode mode) {
+  bool ShouldDelete(const Slice& key, RangeDelPositioningMode mode) {
     ParsedInternalKey parsed;
 
     Status pik_status =
-        ParseInternalKey(ikey, &parsed, false /* log_err_key */);  // TODO
+        ParseInternalKey(key, &parsed, false /* log_err_key */);  // TODO
     assert(pik_status.ok());
     if (!pik_status.ok()) {
       return false;
@@ -339,8 +331,6 @@ class RangeDelAggregator {
       }
     }
 
-    // If user-defined timestamp is enabled, `start` and `end` are user keys
-    // with timestamp.
     bool IsRangeOverlapped(const Slice& start, const Slice& end);
 
    private:
@@ -404,25 +394,8 @@ class ReadRangeDelAggregator final : public RangeDelAggregator {
 class CompactionRangeDelAggregator : public RangeDelAggregator {
  public:
   CompactionRangeDelAggregator(const InternalKeyComparator* icmp,
-                               const std::vector<SequenceNumber>& snapshots,
-                               const std::string* full_history_ts_low = nullptr,
-                               const std::string* trim_ts = nullptr)
-      : RangeDelAggregator(icmp), snapshots_(&snapshots) {
-    if (full_history_ts_low) {
-      ts_upper_bound_ = *full_history_ts_low;
-    }
-    if (trim_ts) {
-      trim_ts_ = *trim_ts;
-      // Range tombstone newer than `trim_ts` or `full_history_ts_low` should
-      // not be considered in ShouldDelete().
-      if (ts_upper_bound_.empty()) {
-        ts_upper_bound_ = trim_ts_;
-      } else if (!trim_ts_.empty() && icmp->user_comparator()->CompareTimestamp(
-                                          trim_ts_, ts_upper_bound_) < 0) {
-        ts_upper_bound_ = trim_ts_;
-      }
-    }
-  }
+                               const std::vector<SequenceNumber>& snapshots)
+      : RangeDelAggregator(icmp), snapshots_(&snapshots) {}
   ~CompactionRangeDelAggregator() override {}
 
   void AddTombstones(
@@ -468,9 +441,6 @@ class CompactionRangeDelAggregator : public RangeDelAggregator {
   std::map<SequenceNumber, StripeRep> reps_;
 
   const std::vector<SequenceNumber>* snapshots_;
-  // min over full_history_ts_low and trim_ts_
-  Slice ts_upper_bound_{};
-  Slice trim_ts_{};
 };
 
 }  // namespace ROCKSDB_NAMESPACE

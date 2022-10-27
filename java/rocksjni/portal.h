@@ -30,13 +30,12 @@
 #include "rocksdb/rate_limiter.h"
 #include "rocksdb/status.h"
 #include "rocksdb/table.h"
-#include "rocksdb/utilities/backup_engine.h"
+#include "rocksdb/utilities/backupable_db.h"
 #include "rocksdb/utilities/memory_util.h"
 #include "rocksdb/utilities/transaction_db.h"
 #include "rocksdb/utilities/write_batch_with_index.h"
 #include "rocksjni/compaction_filter_factory_jnicallback.h"
 #include "rocksjni/comparatorjnicallback.h"
-#include "rocksjni/cplusplus_to_java_convert.h"
 #include "rocksjni/event_listener_jnicallback.h"
 #include "rocksjni/loggerjnicallback.h"
 #include "rocksjni/table_filter_jnicallback.h"
@@ -121,8 +120,7 @@ template<class PTR, class DERIVED> class NativeRocksMutableObject
       return true;  // signal exception
     }
 
-    env->CallVoidMethod(jobj, mid, GET_CPLUSPLUS_POINTER(ptr),
-                        java_owns_handle);
+    env->CallVoidMethod(jobj, mid, reinterpret_cast<jlong>(ptr), java_owns_handle);
     if(env->ExceptionCheck()) {
       return true;  // signal exception
     }
@@ -2127,7 +2125,7 @@ class JniUtil {
         std::function<ROCKSDB_NAMESPACE::Status(ROCKSDB_NAMESPACE::Slice)> op,
         JNIEnv* env, jobject /*jobj*/, jbyteArray jkey, jint jkey_len) {
       jbyte* key = env->GetByteArrayElements(jkey, nullptr);
-      if (env->ExceptionCheck()) {
+      if(env->ExceptionCheck()) {
         // exception thrown: OutOfMemoryError
         return nullptr;
       }
@@ -2137,43 +2135,12 @@ class JniUtil {
 
       auto status = op(key_slice);
 
-      if (key != nullptr) {
+      if(key != nullptr) {
         env->ReleaseByteArrayElements(jkey, key, JNI_ABORT);
       }
 
       return std::unique_ptr<ROCKSDB_NAMESPACE::Status>(
           new ROCKSDB_NAMESPACE::Status(status));
-    }
-
-    /*
-     * Helper for operations on a key which is a region of an array
-     * Used to extract the common code from seek/seekForPrev.
-     * Possible that it can be generalised from that.
-     *
-     * We use GetByteArrayRegion to copy the key region of the whole array into
-     * a char[] We suspect this is not much slower than GetByteArrayElements,
-     * which probably copies anyway.
-     */
-    static void k_op_region(std::function<void(ROCKSDB_NAMESPACE::Slice&)> op,
-                            JNIEnv* env, jbyteArray jkey, jint jkey_off,
-                            jint jkey_len) {
-      const std::unique_ptr<char[]> key(new char[jkey_len]);
-      if (key == nullptr) {
-        jclass oom_class = env->FindClass("/lang/java/OutOfMemoryError");
-        env->ThrowNew(oom_class,
-                      "Memory allocation failed in RocksDB JNI function");
-        return;
-      }
-      env->GetByteArrayRegion(jkey, jkey_off, jkey_len,
-                              reinterpret_cast<jbyte*>(key.get()));
-      if (env->ExceptionCheck()) {
-        // exception thrown: OutOfMemoryError
-        return;
-      }
-
-      ROCKSDB_NAMESPACE::Slice key_slice(reinterpret_cast<char*>(key.get()),
-                                         jkey_len);
-      op(key_slice);
     }
 
     /*
@@ -2276,9 +2243,9 @@ class JniUtil {
         jboolean *has_exception) {
       const jsize len = static_cast<jsize>(pointers.size());
       std::unique_ptr<jlong[]> results(new jlong[len]);
-      std::transform(
-          pointers.begin(), pointers.end(), results.get(),
-          [](T* pointer) -> jlong { return GET_CPLUSPLUS_POINTER(pointer); });
+      std::transform(pointers.begin(), pointers.end(), results.get(), [](T* pointer) -> jlong {
+        return reinterpret_cast<jlong>(pointer);
+      });
 
       jlongArray jpointers = env->NewLongArray(len);
       if (jpointers == nullptr) {
@@ -2818,7 +2785,7 @@ class ColumnFamilyOptionsJni
       return nullptr;
     }
 
-    jobject jcfd = env->NewObject(jclazz, mid, GET_CPLUSPLUS_POINTER(cfo));
+    jobject jcfd = env->NewObject(jclazz, mid, reinterpret_cast<jlong>(cfo));
     if (env->ExceptionCheck()) {
       return nullptr;
     }
@@ -2904,7 +2871,7 @@ class WriteBatchJni
       return nullptr;
     }
 
-    jobject jwb = env->NewObject(jclazz, mid, GET_CPLUSPLUS_POINTER(wb));
+    jobject jwb = env->NewObject(jclazz, mid, reinterpret_cast<jlong>(wb));
     if (env->ExceptionCheck()) {
       return nullptr;
     }
@@ -3442,13 +3409,13 @@ class HistogramDataJni : public JavaClass {
   }
 };
 
-// The portal class for org.rocksdb.BackupEngineOptions
-class BackupEngineOptionsJni
-    : public RocksDBNativeClass<ROCKSDB_NAMESPACE::BackupEngineOptions*,
-                                BackupEngineOptionsJni> {
+// The portal class for org.rocksdb.BackupableDBOptions
+class BackupableDBOptionsJni
+    : public RocksDBNativeClass<ROCKSDB_NAMESPACE::BackupableDBOptions*,
+                                BackupableDBOptionsJni> {
  public:
   /**
-   * Get the Java Class org.rocksdb.BackupEngineOptions
+   * Get the Java Class org.rocksdb.BackupableDBOptions
    *
    * @param env A pointer to the Java environment
    *
@@ -3458,7 +3425,7 @@ class BackupEngineOptionsJni
    */
   static jclass getJClass(JNIEnv* env) {
     return RocksDBNativeClass::getJClass(env,
-                                         "org/rocksdb/BackupEngineOptions");
+        "org/rocksdb/BackupableDBOptions");
   }
 };
 
@@ -3468,7 +3435,7 @@ class BackupEngineJni
                                 BackupEngineJni> {
  public:
   /**
-   * Get the Java Class org.rocksdb.BackupEngine
+   * Get the Java Class org.rocksdb.BackupableEngine
    *
    * @param env A pointer to the Java environment
    *
@@ -3529,7 +3496,7 @@ class ColumnFamilyHandleJni
     assert(jclazz != nullptr);
     static jmethodID ctor = getConstructorMethodId(env, jclazz);
     assert(ctor != nullptr);
-    return env->NewObject(jclazz, ctor, GET_CPLUSPLUS_POINTER(info));
+    return env->NewObject(jclazz, ctor, reinterpret_cast<jlong>(info));
   }
 
   static jmethodID getConstructorMethodId(JNIEnv* env, jclass clazz) {
@@ -4622,8 +4589,6 @@ class CompactionPriorityJni {
         return 0x2;
       case ROCKSDB_NAMESPACE::CompactionPri::kMinOverlappingRatio:
         return 0x3;
-      case ROCKSDB_NAMESPACE::CompactionPri::kRoundRobin:
-        return 0x4;
       default:
         return 0x0;  // undefined
     }
@@ -4642,8 +4607,6 @@ class CompactionPriorityJni {
         return ROCKSDB_NAMESPACE::CompactionPri::kOldestSmallestSeqFirst;
       case 0x3:
         return ROCKSDB_NAMESPACE::CompactionPri::kMinOverlappingRatio;
-      case 0x4:
-        return ROCKSDB_NAMESPACE::CompactionPri::kRoundRobin;
       default:
         // undefined/default
         return ROCKSDB_NAMESPACE::CompactionPri::kByCompensatedSize;
@@ -5082,28 +5045,6 @@ class TickerTypeJni {
         return -0x28;
       case ROCKSDB_NAMESPACE::Tickers::COLD_FILE_READ_COUNT:
         return -0x29;
-      case ROCKSDB_NAMESPACE::Tickers::LAST_LEVEL_READ_BYTES:
-        return -0x2A;
-      case ROCKSDB_NAMESPACE::Tickers::LAST_LEVEL_READ_COUNT:
-        return -0x2B;
-      case ROCKSDB_NAMESPACE::Tickers::NON_LAST_LEVEL_READ_BYTES:
-        return -0x2C;
-      case ROCKSDB_NAMESPACE::Tickers::NON_LAST_LEVEL_READ_COUNT:
-        return -0x2D;
-      case ROCKSDB_NAMESPACE::Tickers::BLOCK_CHECKSUM_COMPUTE_COUNT:
-        return -0x2E;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_MISS:
-        return -0x2F;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_HIT:
-        return -0x30;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_ADD:
-        return -0x31;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_ADD_FAILURES:
-        return -0x32;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_BYTES_READ:
-        return -0x33;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_BYTES_WRITE:
-        return -0x34;
       case ROCKSDB_NAMESPACE::Tickers::TICKER_ENUM_MAX:
         // 0x5F was the max value in the initial copy of tickers to Java.
         // Since these values are exposed directly to Java clients, we keep
@@ -5465,28 +5406,6 @@ class TickerTypeJni {
         return ROCKSDB_NAMESPACE::Tickers::WARM_FILE_READ_COUNT;
       case -0x29:
         return ROCKSDB_NAMESPACE::Tickers::COLD_FILE_READ_COUNT;
-      case -0x2A:
-        return ROCKSDB_NAMESPACE::Tickers::LAST_LEVEL_READ_BYTES;
-      case -0x2B:
-        return ROCKSDB_NAMESPACE::Tickers::LAST_LEVEL_READ_COUNT;
-      case -0x2C:
-        return ROCKSDB_NAMESPACE::Tickers::NON_LAST_LEVEL_READ_BYTES;
-      case -0x2D:
-        return ROCKSDB_NAMESPACE::Tickers::NON_LAST_LEVEL_READ_COUNT;
-      case -0x2E:
-        return ROCKSDB_NAMESPACE::Tickers::BLOCK_CHECKSUM_COMPUTE_COUNT;
-      case -0x2F:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_MISS;
-      case -0x30:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_HIT;
-      case -0x31:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_ADD;
-      case -0x32:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_ADD_FAILURES;
-      case -0x33:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_BYTES_READ;
-      case -0x34:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_CACHE_BYTES_WRITE;
       case 0x5F:
         // 0x5F was the max value in the initial copy of tickers to Java.
         // Since these values are exposed directly to Java clients, we keep
@@ -5614,19 +5533,7 @@ class HistogramTypeJni {
       case ROCKSDB_NAMESPACE::Histograms::NUM_SST_READ_PER_LEVEL:
         return 0x31;
       case ROCKSDB_NAMESPACE::Histograms::ERROR_HANDLER_AUTORESUME_RETRY_COUNT:
-        return 0x32;
-      case ROCKSDB_NAMESPACE::Histograms::ASYNC_READ_BYTES:
-        return 0x33;
-      case ROCKSDB_NAMESPACE::Histograms::POLL_WAIT_MICROS:
-        return 0x34;
-      case ROCKSDB_NAMESPACE::Histograms::PREFETCHED_BYTES_DISCARDED:
-        return 0x35;
-      case ROCKSDB_NAMESPACE::Histograms::MULTIGET_IO_BATCH_SIZE:
-        return 0x36;
-      case NUM_LEVEL_READ_PER_MULTIGET:
-        return 0x37;
-      case ASYNC_PREFETCH_ABORT_MICROS:
-        return 0x38;
+        return 0x31;
       case ROCKSDB_NAMESPACE::Histograms::HISTOGRAM_ENUM_MAX:
         // 0x1F for backwards compatibility on current minor version.
         return 0x1F;
@@ -5744,18 +5651,6 @@ class HistogramTypeJni {
       case 0x32:
         return ROCKSDB_NAMESPACE::Histograms::
             ERROR_HANDLER_AUTORESUME_RETRY_COUNT;
-      case 0x33:
-        return ROCKSDB_NAMESPACE::Histograms::ASYNC_READ_BYTES;
-      case 0x34:
-        return ROCKSDB_NAMESPACE::Histograms::POLL_WAIT_MICROS;
-      case 0x35:
-        return ROCKSDB_NAMESPACE::Histograms::PREFETCHED_BYTES_DISCARDED;
-      case 0x36:
-        return ROCKSDB_NAMESPACE::Histograms::MULTIGET_IO_BATCH_SIZE;
-      case 0x37:
-        return ROCKSDB_NAMESPACE::Histograms::NUM_LEVEL_READ_PER_MULTIGET;
-      case 0x38:
-        return ROCKSDB_NAMESPACE::Histograms::ASYNC_PREFETCH_ABORT_MICROS;
       case 0x1F:
         // 0x1F for backwards compatibility on current minor version.
         return ROCKSDB_NAMESPACE::Histograms::HISTOGRAM_ENUM_MAX;
@@ -6626,8 +6521,6 @@ class ChecksumTypeJni {
         return 0x2;
       case ROCKSDB_NAMESPACE::ChecksumType::kxxHash64:
         return 0x3;
-      case ROCKSDB_NAMESPACE::ChecksumType::kXXH3:
-        return 0x4;
       default:
         return 0x7F;  // undefined
     }
@@ -7906,40 +7799,6 @@ class SanityLevelJni {
   }
 };
 
-// The portal class for org.rocksdb.PrepopulateBlobCache
-class PrepopulateBlobCacheJni {
- public:
-  // Returns the equivalent org.rocksdb.PrepopulateBlobCache for the provided
-  // C++ ROCKSDB_NAMESPACE::PrepopulateBlobCache enum
-  static jbyte toJavaPrepopulateBlobCache(
-      ROCKSDB_NAMESPACE::PrepopulateBlobCache prepopulate_blob_cache) {
-    switch (prepopulate_blob_cache) {
-      case ROCKSDB_NAMESPACE::PrepopulateBlobCache::kDisable:
-        return 0x0;
-      case ROCKSDB_NAMESPACE::PrepopulateBlobCache::kFlushOnly:
-        return 0x1;
-      default:
-        return 0x7f;  // undefined
-    }
-  }
-
-  // Returns the equivalent C++ ROCKSDB_NAMESPACE::PrepopulateBlobCache enum for
-  // the provided Java org.rocksdb.PrepopulateBlobCache
-  static ROCKSDB_NAMESPACE::PrepopulateBlobCache toCppPrepopulateBlobCache(
-      jbyte jprepopulate_blob_cache) {
-    switch (jprepopulate_blob_cache) {
-      case 0x0:
-        return ROCKSDB_NAMESPACE::PrepopulateBlobCache::kDisable;
-      case 0x1:
-        return ROCKSDB_NAMESPACE::PrepopulateBlobCache::kFlushOnly;
-      case 0x7F:
-      default:
-        // undefined/default
-        return ROCKSDB_NAMESPACE::PrepopulateBlobCache::kDisable;
-    }
-  }
-};
-
 // The portal class for org.rocksdb.AbstractListener.EnabledEventCallback
 class EnabledEventCallbackJni {
  public:
@@ -8452,7 +8311,7 @@ class CompactionJobInfoJni : public JavaClass {
     static jmethodID ctor = getConstructorMethodId(env, jclazz);
     assert(ctor != nullptr);
     return env->NewObject(jclazz, ctor,
-                          GET_CPLUSPLUS_POINTER(compaction_job_info));
+                          reinterpret_cast<jlong>(compaction_job_info));
   }
 
   static jclass getJClass(JNIEnv* env) {

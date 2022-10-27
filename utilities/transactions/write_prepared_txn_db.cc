@@ -26,18 +26,6 @@
 #include "utilities/transactions/pessimistic_transaction.h"
 #include "utilities/transactions/transaction_db_mutex_impl.h"
 
-// This function is for testing only. If it returns true, then all entries in
-// the commit cache will be evicted. Unit and/or stress tests (db_stress)
-// can implement this function and customize how frequently commit cache
-// eviction occurs.
-// TODO: remove this function once we can configure commit cache to be very
-// small so that eviction occurs very frequently. This requires the commit
-// cache entry to be able to encode prepare and commit sequence numbers so that
-// the commit sequence number does not have to be within a certain range of
-// prepare sequence number.
-extern "C" bool rocksdb_write_prepared_TEST_ShouldClearCommitCache(void)
-    __attribute__((__weak__));
-
 namespace ROCKSDB_NAMESPACE {
 
 Status WritePreparedTxnDB::Initialize(
@@ -166,15 +154,6 @@ Status WritePreparedTxnDB::WriteInternal(const WriteOptions& write_options_orig,
     // increased for this batch.
     return Status::OK();
   }
-
-  if (write_options_orig.protection_bytes_per_key > 0) {
-    auto s = WriteBatchInternal::UpdateProtectionInfo(
-        batch, write_options_orig.protection_bytes_per_key);
-    if (!s.ok()) {
-      return s;
-    }
-  }
-
   if (batch_cnt == 0) {  // not provided, then compute it
     // TODO(myabandeh): add an option to allow user skipping this cost
     SubBatchCounter counter(*GetCFComparatorMap());
@@ -267,7 +246,6 @@ Status WritePreparedTxnDB::Get(const ReadOptions& options,
                                                   backed_by_snapshot))) {
     return res;
   } else {
-    res.PermitUncheckedError();
     WPRecordTick(TXN_GET_TRY_AGAIN);
     return Status::TryAgain();
   }
@@ -415,7 +393,7 @@ Status WritePreparedTxnDB::NewIterators(
   return Status::OK();
 }
 
-void WritePreparedTxnDB::Init(const TransactionDBOptions& txn_db_opts) {
+void WritePreparedTxnDB::Init(const TransactionDBOptions& /* unused */) {
   // Adcance max_evicted_seq_ no more than 100 times before the cache wraps
   // around.
   INC_STEP_FOR_MAX_EVICTED =
@@ -425,8 +403,6 @@ void WritePreparedTxnDB::Init(const TransactionDBOptions& txn_db_opts) {
   commit_cache_ = std::unique_ptr<std::atomic<CommitEntry64b>[]>(
       new std::atomic<CommitEntry64b>[COMMIT_CACHE_SIZE] {});
   dummy_max_snapshot_.number_ = kMaxSequenceNumber;
-  rollback_deletion_type_callback_ =
-      txn_db_opts.rollback_deletion_type_callback;
 }
 
 void WritePreparedTxnDB::CheckPreparedAgainstMax(SequenceNumber new_max,
@@ -456,7 +432,7 @@ void WritePreparedTxnDB::CheckPreparedAgainstMax(SequenceNumber new_max,
       delayed_prepared_.insert(to_be_popped);
       ROCKS_LOG_WARN(info_log_,
                      "prepared_mutex_ overhead %" PRIu64 " (prep=%" PRIu64
-                     " new_max=%" PRIu64 ")",
+                     " new_max=%" PRIu64,
                      static_cast<uint64_t>(delayed_prepared_.size()),
                      to_be_popped, new_max);
       delayed_prepared_empty_.store(false, std::memory_order_release);
@@ -526,12 +502,6 @@ void WritePreparedTxnDB::AddCommitted(uint64_t prepare_seq, uint64_t commit_seq,
         // legit when a commit entry in a write batch overwrite the previous one
         max_evicted_seq = evicted.commit_seq;
       }
-#ifdef OS_LINUX
-      if (rocksdb_write_prepared_TEST_ShouldClearCommitCache &&
-          rocksdb_write_prepared_TEST_ShouldClearCommitCache()) {
-        max_evicted_seq = last;
-      }
-#endif  // OS_LINUX
       ROCKS_LOG_DETAILS(info_log_,
                         "%lu Evicting %" PRIu64 ",%" PRIu64 " with max %" PRIu64
                         " => %lu",
@@ -735,10 +705,9 @@ SnapshotImpl* WritePreparedTxnDB::GetSnapshotInternal(
     assert(snap_impl->GetSequenceNumber() > max);
     if (snap_impl->GetSequenceNumber() <= max) {
       throw std::runtime_error(
-          "Snapshot seq " + std::to_string(snap_impl->GetSequenceNumber()) +
-          " after " + std::to_string(retry) +
-          " retries is still less than futre_max_evicted_seq_" +
-          std::to_string(max));
+          "Snapshot seq " + ToString(snap_impl->GetSequenceNumber()) +
+          " after " + ToString(retry) +
+          " retries is still less than futre_max_evicted_seq_" + ToString(max));
     }
   }
   EnhanceSnapshot(snap_impl, min_uncommitted);

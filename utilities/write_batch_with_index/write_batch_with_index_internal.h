@@ -95,7 +95,7 @@ struct WriteBatchIndexEntry {
                        bool is_forward_direction, bool is_seek_to_first)
       // For SeekForPrev(), we need to make the dummy entry larger than any
       // entry who has the same search key. Otherwise, we'll miss those entries.
-      : offset(is_forward_direction ? 0 : std::numeric_limits<size_t>::max()),
+      : offset(is_forward_direction ? 0 : port::kMaxSizet),
         column_family(_column_family),
         key_offset(0),
         key_size(is_seek_to_first ? kFlagMinInCf : 0),
@@ -105,7 +105,7 @@ struct WriteBatchIndexEntry {
 
   // If this flag appears in the key_size, it indicates a
   // key that is smaller than any other entry for the same column family.
-  static const size_t kFlagMinInCf = std::numeric_limits<size_t>::max();
+  static const size_t kFlagMinInCf = port::kMaxSizet;
 
   bool is_min_in_cf() const {
     assert(key_size != kFlagMinInCf ||
@@ -137,11 +137,8 @@ struct WriteBatchIndexEntry {
 
 class ReadableWriteBatch : public WriteBatch {
  public:
-  explicit ReadableWriteBatch(size_t reserved_bytes = 0, size_t max_bytes = 0,
-                              size_t protection_bytes_per_key = 0,
-                              size_t default_cf_ts_sz = 0)
-      : WriteBatch(reserved_bytes, max_bytes, protection_bytes_per_key,
-                   default_cf_ts_sz) {}
+  explicit ReadableWriteBatch(size_t reserved_bytes = 0, size_t max_bytes = 0)
+      : WriteBatch(reserved_bytes, max_bytes) {}
   // Retrieve some information from a write entry in the write batch, given
   // the start offset of the write entry.
   Status GetEntryFromDataOffset(size_t data_offset, WriteType* type, Slice* Key,
@@ -171,15 +168,10 @@ class WriteBatchEntryComparator {
 
   const Comparator* default_comparator() { return default_comparator_; }
 
-  const Comparator* GetComparator(
-      const ColumnFamilyHandle* column_family) const;
-
-  const Comparator* GetComparator(uint32_t column_family) const;
-
  private:
-  const Comparator* const default_comparator_;
+  const Comparator* default_comparator_;
   std::vector<const Comparator*> cf_comparators_;
-  const ReadableWriteBatch* const write_batch_;
+  const ReadableWriteBatch* write_batch_;
 };
 
 using WriteBatchEntrySkipList =
@@ -187,13 +179,7 @@ using WriteBatchEntrySkipList =
 
 class WBWIIteratorImpl : public WBWIIterator {
  public:
-  enum Result : uint8_t {
-    kFound,
-    kDeleted,
-    kNotFound,
-    kMergeInProgress,
-    kError
-  };
+  enum Result { kFound, kDeleted, kNotFound, kMergeInProgress, kError };
   WBWIIteratorImpl(uint32_t column_family_id,
                    WriteBatchEntrySkipList* skip_list,
                    const ReadableWriteBatch* write_batch,
@@ -265,9 +251,9 @@ class WBWIIteratorImpl : public WBWIIterator {
 
   bool MatchesKey(uint32_t cf_id, const Slice& key);
 
-  // Moves the iterator to first entry of the previous key.
+  // Moves the to first entry of the previous key.
   void PrevKey();
-  // Moves the iterator to first entry of the next key.
+  // Moves the to first entry of the next key.
   void NextKey();
 
   // Moves the iterator to the Update (Put or Delete) for the current key
@@ -294,9 +280,6 @@ class WBWIIteratorImpl : public WBWIIterator {
 
 class WriteBatchWithIndexInternal {
  public:
-  static const Comparator* GetUserComparator(const WriteBatchWithIndex& wbwi,
-                                             uint32_t cf_id);
-
   // For GetFromBatchAndDB or similar
   explicit WriteBatchWithIndexInternal(DB* db,
                                        ColumnFamilyHandle* column_family);

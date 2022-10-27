@@ -36,7 +36,7 @@ enum CacheDumpUnitType : unsigned char {
   kHashIndexMetadata = 9,
   kMetaIndex = 10,
   kIndex = 11,
-  kDeprecatedFilterBlock = 12,  // OBSOLETE / DEPRECATED
+  kDeprecatedFilterBlock = 12,
   kFilterMetaBlock = 13,
   kBlockTypeMax,
 };
@@ -75,7 +75,7 @@ struct DumpUnit {
   // Pointer to the block. Note that, in the dump process, it points to a memory
   // buffer copied from cache block. The buffer is freed when we process the
   // next block. In the load process, we use an std::string to store the
-  // serialized dump_unit read from the reader. So it points to the memory
+  // serilized dump_unit read from the reader. So it points to the memory
   // address of the begin of the block in this string.
   void* value;
 
@@ -103,9 +103,14 @@ class CacheDumperImpl : public CacheDumper {
   IOStatus DumpCacheEntriesToWriter() override;
 
  private:
-  IOStatus WriteBlock(CacheDumpUnitType type, const Slice& key,
-                      const Slice& value);
+  IOStatus WriteRawBlock(uint64_t timestamp, CacheDumpUnitType type,
+                         const Slice& key, void* value, size_t len,
+                         uint32_t checksum);
+
   IOStatus WriteHeader();
+
+  IOStatus WriteCacheBlock(const CacheDumpUnitType type, const Slice& key,
+                           void* value, size_t len);
   IOStatus WriteFooter();
   bool ShouldFilterOut(const Slice& key);
   std::function<void(const Slice&, void*, size_t, Cache::DeleterFn)>
@@ -114,7 +119,7 @@ class CacheDumperImpl : public CacheDumper {
   CacheDumpOptions options_;
   std::shared_ptr<Cache> cache_;
   std::unique_ptr<CacheDumpWriter> writer_;
-  UnorderedMap<Cache::DeleterFn, CacheEntryRole> role_map_;
+  std::unordered_map<Cache::DeleterFn, CacheEntryRole> role_map_;
   SystemClock* clock_;
   uint32_t sequence_num_;
   // The cache key prefix filter. Currently, we use db_session_id as the prefix,
@@ -148,7 +153,7 @@ class CacheDumpedLoaderImpl : public CacheDumpedLoader {
   const BlockBasedTableOptions& toptions_;
   std::shared_ptr<SecondaryCache> secondary_cache_;
   std::unique_ptr<CacheDumpReader> reader_;
-  UnorderedMap<Cache::DeleterFn, CacheEntryRole> role_map_;
+  std::unordered_map<Cache::DeleterFn, CacheEntryRole> role_map_;
 };
 
 // The default implementation of CacheDumpWriter. We write the blocks to a file
@@ -161,7 +166,7 @@ class ToFileCacheDumpWriter : public CacheDumpWriter {
 
   ~ToFileCacheDumpWriter() { Close().PermitUncheckedError(); }
 
-  // Write the serialized metadata to the file
+  // Write the serilized metadata to the file
   virtual IOStatus WriteMetadata(const Slice& metadata) override {
     assert(file_writer_ != nullptr);
     std::string prefix;
@@ -174,7 +179,7 @@ class ToFileCacheDumpWriter : public CacheDumpWriter {
     return io_s;
   }
 
-  // Write the serialized data to the file
+  // Write the serilized data to the file
   virtual IOStatus WritePacket(const Slice& data) override {
     assert(file_writer_ != nullptr);
     std::string prefix;
@@ -253,8 +258,7 @@ class FromFileCacheDumpReader : public CacheDumpReader {
 
     while (to_read > 0) {
       io_s = file_reader_->Read(IOOptions(), offset_, to_read, &result_,
-                                buffer_, nullptr,
-                                Env::IO_TOTAL /* rate_limiter_priority */);
+                                buffer_, nullptr);
       if (!io_s.ok()) {
         return io_s;
       }
@@ -279,7 +283,7 @@ class FromFileCacheDumpReader : public CacheDumpReader {
 // The cache dump and load helper class
 class CacheDumperHelper {
  public:
-  // serialize the dump_unit_meta to a string, it is fixed 16 bytes size.
+  // serilize the dump_unit_meta to a string, it is fixed 16 bytes size.
   static void EncodeDumpUnitMeta(const DumpUnitMeta& meta, std::string* data) {
     assert(data);
     PutFixed32(data, static_cast<uint32_t>(meta.sequence_num));
@@ -287,7 +291,7 @@ class CacheDumperHelper {
     PutFixed64(data, meta.dump_unit_size);
   }
 
-  // Serialize the dump_unit to a string.
+  // Serilize the dump_unit to a string.
   static void EncodeDumpUnit(const DumpUnit& dump_unit, std::string* data) {
     assert(data);
     PutFixed64(data, dump_unit.timestamp);
@@ -299,7 +303,7 @@ class CacheDumperHelper {
                            Slice((char*)dump_unit.value, dump_unit.value_len));
   }
 
-  // Deserialize the dump_unit_meta from a string
+  // Deserilize the dump_unit_meta from a string
   static Status DecodeDumpUnitMeta(const std::string& encoded_data,
                                    DumpUnitMeta* unit_meta) {
     assert(unit_meta != nullptr);
@@ -318,7 +322,7 @@ class CacheDumperHelper {
     return Status::OK();
   }
 
-  // Deserialize the dump_unit from a string.
+  // Deserilize the dump_unit from a string.
   static Status DecodeDumpUnit(const std::string& encoded_data,
                                DumpUnit* dump_unit) {
     assert(dump_unit != nullptr);

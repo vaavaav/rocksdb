@@ -94,9 +94,6 @@ class PlainTableBuilder: public TableBuilder {
   // Get file checksum function name
   const char* GetFileChecksumFuncName() const override;
 
-  void SetSeqnoTimeTableProperties(const std::string& string,
-                                   uint64_t uint_64) override;
-
  private:
   Arena arena_;
   const ImmutableOptions& ioptions_;
@@ -125,11 +122,15 @@ class PlainTableBuilder: public TableBuilder {
 
   Slice GetPrefix(const Slice& target) const {
     assert(target.size() >= 8);  // target is internal key
-    return GetPrefixFromUserKey(ExtractUserKey(target));
+    return GetPrefixFromUserKey(GetUserKey(target));
   }
 
   Slice GetPrefix(const ParsedInternalKey& target) const {
     return GetPrefixFromUserKey(target.user_key);
+  }
+
+  Slice GetUserKey(const Slice& key) const {
+    return Slice(key.data(), key.size() - 8);
   }
 
   Slice GetPrefixFromUserKey(const Slice& user_key) const {

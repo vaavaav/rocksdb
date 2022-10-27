@@ -209,16 +209,10 @@ class HashLinkListRep : public MemTableRep {
 
   bool LinkListContains(Node* head, const Slice& key) const;
 
-  bool IsEmptyBucket(Pointer& bucket_pointer) const {
-    return bucket_pointer.load(std::memory_order_acquire) == nullptr;
-  }
+  SkipListBucketHeader* GetSkipListBucketHeader(Pointer* first_next_pointer)
+      const;
 
-  // Precondition: GetLinkListFirstNode() must have been called first and return
-  // null so that it must be a skip list bucket
-  SkipListBucketHeader* GetSkipListBucketHeader(Pointer& bucket_pointer) const;
-
-  // Returning nullptr indicates it is a skip list bucket.
-  Node* GetLinkListFirstNode(Pointer& bucket_pointer) const;
+  Node* GetLinkListFirstNode(Pointer* first_next_pointer) const;
 
   Slice GetPrefix(const Slice& internal_key) const {
     return transform_->Transform(ExtractUserKey(internal_key));
@@ -228,9 +222,11 @@ class HashLinkListRep : public MemTableRep {
     return GetSliceRangedNPHash(slice, bucket_size_);
   }
 
-  Pointer& GetBucket(size_t i) const { return buckets_[i]; }
+  Pointer* GetBucket(size_t i) const {
+    return static_cast<Pointer*>(buckets_[i].load(std::memory_order_acquire));
+  }
 
-  Pointer& GetBucket(const Slice& slice) const {
+  Pointer* GetBucket(const Slice& slice) const {
     return GetBucket(GetHash(slice));
   }
 
@@ -418,39 +414,30 @@ class HashLinkListRep : public MemTableRep {
     // Advance to the first entry with a key >= target
     void Seek(const Slice& k, const char* memtable_key) override {
       auto transformed = memtable_rep_.GetPrefix(k);
-      Pointer& bucket = memtable_rep_.GetBucket(transformed);
+      auto* bucket = memtable_rep_.GetBucket(transformed);
 
-      if (memtable_rep_.IsEmptyBucket(bucket)) {
-        skip_list_iter_.reset();
-        Reset(nullptr);
-      } else {
-        Node* first_linked_list_node =
-            memtable_rep_.GetLinkListFirstNode(bucket);
-        if (first_linked_list_node != nullptr) {
-          // The bucket is organized as a linked list
-          skip_list_iter_.reset();
-          Reset(first_linked_list_node);
-          HashLinkListRep::LinkListIterator::Seek(k, memtable_key);
-
+      SkipListBucketHeader* skip_list_header =
+          memtable_rep_.GetSkipListBucketHeader(bucket);
+      if (skip_list_header != nullptr) {
+        // The bucket is organized as a skip list
+        if (!skip_list_iter_) {
+          skip_list_iter_.reset(
+              new MemtableSkipList::Iterator(&skip_list_header->skip_list));
         } else {
-          SkipListBucketHeader* skip_list_header =
-              memtable_rep_.GetSkipListBucketHeader(bucket);
-          assert(skip_list_header != nullptr);
-          // The bucket is organized as a skip list
-          if (!skip_list_iter_) {
-            skip_list_iter_.reset(
-                new MemtableSkipList::Iterator(&skip_list_header->skip_list));
-          } else {
-            skip_list_iter_->SetList(&skip_list_header->skip_list);
-          }
-          if (memtable_key != nullptr) {
-            skip_list_iter_->Seek(memtable_key);
-          } else {
-            IterKey encoded_key;
-            encoded_key.EncodeLengthPrefixedKey(k);
-            skip_list_iter_->Seek(encoded_key.GetUserKey().data());
-          }
+          skip_list_iter_->SetList(&skip_list_header->skip_list);
         }
+        if (memtable_key != nullptr) {
+          skip_list_iter_->Seek(memtable_key);
+        } else {
+          IterKey encoded_key;
+          encoded_key.EncodeLengthPrefixedKey(k);
+          skip_list_iter_->Seek(encoded_key.GetUserKey().data());
+        }
+      } else {
+        // The bucket is organized as a linked list
+        skip_list_iter_.reset();
+        Reset(memtable_rep_.GetLinkListFirstNode(bucket));
+        HashLinkListRep::LinkListIterator::Seek(k, memtable_key);
       }
     }
 
@@ -541,38 +528,36 @@ KeyHandle HashLinkListRep::Allocate(const size_t len, char** buf) {
 }
 
 SkipListBucketHeader* HashLinkListRep::GetSkipListBucketHeader(
-    Pointer& bucket_pointer) const {
-  Pointer* first_next_pointer =
-      static_cast<Pointer*>(bucket_pointer.load(std::memory_order_acquire));
-  assert(first_next_pointer != nullptr);
-  assert(first_next_pointer->load(std::memory_order_relaxed) != nullptr);
-
+    Pointer* first_next_pointer) const {
+  if (first_next_pointer == nullptr) {
+    return nullptr;
+  }
+  if (first_next_pointer->load(std::memory_order_relaxed) == nullptr) {
+    // Single entry bucket
+    return nullptr;
+  }
   // Counting header
   BucketHeader* header = reinterpret_cast<BucketHeader*>(first_next_pointer);
-  assert(header->IsSkipListBucket());
-  assert(header->GetNumEntries() > threshold_use_skiplist_);
-  auto* skip_list_bucket_header =
-      reinterpret_cast<SkipListBucketHeader*>(header);
-  assert(skip_list_bucket_header->Counting_header.next.load(
-             std::memory_order_relaxed) == header);
-  return skip_list_bucket_header;
+  if (header->IsSkipListBucket()) {
+    assert(header->GetNumEntries() > threshold_use_skiplist_);
+    auto* skip_list_bucket_header =
+        reinterpret_cast<SkipListBucketHeader*>(header);
+    assert(skip_list_bucket_header->Counting_header.next.load(
+               std::memory_order_relaxed) == header);
+    return skip_list_bucket_header;
+  }
+  assert(header->GetNumEntries() <= threshold_use_skiplist_);
+  return nullptr;
 }
 
-Node* HashLinkListRep::GetLinkListFirstNode(Pointer& bucket_pointer) const {
-  Pointer* first_next_pointer =
-      static_cast<Pointer*>(bucket_pointer.load(std::memory_order_acquire));
-  assert(first_next_pointer != nullptr);
+Node* HashLinkListRep::GetLinkListFirstNode(Pointer* first_next_pointer) const {
+  if (first_next_pointer == nullptr) {
+    return nullptr;
+  }
   if (first_next_pointer->load(std::memory_order_relaxed) == nullptr) {
     // Single entry bucket
     return reinterpret_cast<Node*>(first_next_pointer);
   }
-
-  // It is possible that after we fetch first_next_pointer it is modified
-  // and the next is not null anymore. In this case, the bucket should have been
-  // modified to a counting header, so we should reload the first_next_pointer
-  // to make sure we see the update.
-  first_next_pointer =
-      static_cast<Pointer*>(bucket_pointer.load(std::memory_order_acquire));
   // Counting header
   BucketHeader* header = reinterpret_cast<BucketHeader*>(first_next_pointer);
   if (!header->IsSkipListBucket()) {
@@ -710,21 +695,17 @@ bool HashLinkListRep::Contains(const char* key) const {
   Slice internal_key = GetLengthPrefixedSlice(key);
 
   auto transformed = GetPrefix(internal_key);
-  Pointer& bucket = GetBucket(transformed);
-  if (IsEmptyBucket(bucket)) {
+  auto bucket = GetBucket(transformed);
+  if (bucket == nullptr) {
     return false;
-  }
-
-  Node* linked_list_node = GetLinkListFirstNode(bucket);
-  if (linked_list_node != nullptr) {
-    return LinkListContains(linked_list_node, internal_key);
   }
 
   SkipListBucketHeader* skip_list_header = GetSkipListBucketHeader(bucket);
   if (skip_list_header != nullptr) {
     return skip_list_header->skip_list.Contains(key);
+  } else {
+    return LinkListContains(GetLinkListFirstNode(bucket), internal_key);
   }
-  return false;
 }
 
 size_t HashLinkListRep::ApproximateMemoryUsage() {
@@ -735,25 +716,21 @@ size_t HashLinkListRep::ApproximateMemoryUsage() {
 void HashLinkListRep::Get(const LookupKey& k, void* callback_args,
                           bool (*callback_func)(void* arg, const char* entry)) {
   auto transformed = transform_->Transform(k.user_key());
-  Pointer& bucket = GetBucket(transformed);
+  auto bucket = GetBucket(transformed);
 
-  if (IsEmptyBucket(bucket)) {
-    return;
-  }
-
-  auto* link_list_head = GetLinkListFirstNode(bucket);
-  if (link_list_head != nullptr) {
-    LinkListIterator iter(this, link_list_head);
-    for (iter.Seek(k.internal_key(), nullptr);
+  auto* skip_list_header = GetSkipListBucketHeader(bucket);
+  if (skip_list_header != nullptr) {
+    // Is a skip list
+    MemtableSkipList::Iterator iter(&skip_list_header->skip_list);
+    for (iter.Seek(k.memtable_key().data());
          iter.Valid() && callback_func(callback_args, iter.key());
          iter.Next()) {
     }
   } else {
-    auto* skip_list_header = GetSkipListBucketHeader(bucket);
-    if (skip_list_header != nullptr) {
-      // Is a skip list
-      MemtableSkipList::Iterator iter(&skip_list_header->skip_list);
-      for (iter.Seek(k.memtable_key().data());
+    auto* link_list_head = GetLinkListFirstNode(bucket);
+    if (link_list_head != nullptr) {
+      LinkListIterator iter(this, link_list_head);
+      for (iter.Seek(k.internal_key(), nullptr);
            iter.Valid() && callback_func(callback_args, iter.key());
            iter.Next()) {
       }
@@ -769,24 +746,25 @@ MemTableRep::Iterator* HashLinkListRep::GetIterator(Arena* alloc_arena) {
 
   for (size_t i = 0; i < bucket_size_; ++i) {
     int count = 0;
-    Pointer& bucket = GetBucket(i);
-    if (!IsEmptyBucket(bucket)) {
-      auto* link_list_head = GetLinkListFirstNode(bucket);
-      if (link_list_head != nullptr) {
-        LinkListIterator itr(this, link_list_head);
-        for (itr.SeekToHead(); itr.Valid(); itr.Next()) {
-          list->Insert(itr.key());
-          count++;
-        }
-      } else {
-        auto* skip_list_header = GetSkipListBucketHeader(bucket);
-        assert(skip_list_header != nullptr);
+    auto* bucket = GetBucket(i);
+    if (bucket != nullptr) {
+      auto* skip_list_header = GetSkipListBucketHeader(bucket);
+      if (skip_list_header != nullptr) {
         // Is a skip list
         MemtableSkipList::Iterator itr(&skip_list_header->skip_list);
         for (itr.SeekToFirst(); itr.Valid(); itr.Next()) {
           list->Insert(itr.key());
           count++;
+        }
+      } else {
+        auto* link_list_head = GetLinkListFirstNode(bucket);
+        if (link_list_head != nullptr) {
+          LinkListIterator itr(this, link_list_head);
+          for (itr.SeekToHead(); itr.Valid(); itr.Next()) {
+            list->Insert(itr.key());
+            count++;
           }
+        }
       }
     }
     if (if_log_bucket_dist_when_flash_) {

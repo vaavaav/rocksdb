@@ -26,7 +26,8 @@ void BlobLogHeader::EncodeTo(std::string* dst) {
 }
 
 Status BlobLogHeader::DecodeFrom(Slice src) {
-  const char* kErrorMessage = "Error while decoding blob log header";
+  static const std::string kErrorMessage =
+      "Error while decoding blob log header";
   if (src.size() != BlobLogHeader::kSize) {
     return Status::Corruption(kErrorMessage,
                               "Unexpected blob file header size");
@@ -70,7 +71,8 @@ void BlobLogFooter::EncodeTo(std::string* dst) {
 }
 
 Status BlobLogFooter::DecodeFrom(Slice src) {
-  const char* kErrorMessage = "Error while decoding blob log footer";
+  static const std::string kErrorMessage =
+      "Error while decoding blob log footer";
   if (src.size() != BlobLogFooter::kSize) {
     return Status::Corruption(kErrorMessage,
                               "Unexpected blob file footer size");
@@ -110,7 +112,7 @@ void BlobLogRecord::EncodeHeaderTo(std::string* dst) {
 }
 
 Status BlobLogRecord::DecodeHeaderFrom(Slice src) {
-  const char* kErrorMessage = "Error while decoding blob record";
+  static const std::string kErrorMessage = "Error while decoding blob record";
   if (src.size() != BlobLogRecord::kHeaderSize) {
     return Status::Corruption(kErrorMessage,
                               "Unexpected blob record header size");

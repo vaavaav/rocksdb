@@ -5,7 +5,8 @@
 
 // this is a simple micro-benchmark for compare ribbon filter vs. other filter
 // for more comprehensive, please check the dedicate util/filter_bench.
-#include "benchmark/benchmark.h"
+#include <benchmark/benchmark.h>
+
 #include "table/block_based/filter_policy_internal.h"
 #include "table/block_based/mock_block_based_table.h"
 
@@ -47,31 +48,31 @@ struct KeyMaker {
 };
 
 // benchmark arguments:
-// 0. filter impl (like filter_bench -impl)
+// 0. filter mode
 // 1. filter config bits_per_key
 // 2. average data key length
 // 3. data entry number
 static void CustomArguments(benchmark::internal::Benchmark *b) {
-  const auto kImplCount =
-      static_cast<int>(BloomLikeFilterPolicy::GetAllFixedImpls().size());
-  for (int filter_impl = 0; filter_impl < kImplCount; ++filter_impl) {
+  for (int filterMode :
+       {BloomFilterPolicy::kLegacyBloom, BloomFilterPolicy::kFastLocalBloom,
+        BloomFilterPolicy::kStandard128Ribbon}) {
+    //    for (int bits_per_key : {4, 10, 20, 30}) {
     for (int bits_per_key : {10, 20}) {
       for (int key_len_avg : {10, 100}) {
         for (int64_t entry_num : {1 << 10, 1 << 20}) {
-          b->Args({filter_impl, bits_per_key, key_len_avg, entry_num});
+          b->Args({filterMode, bits_per_key, key_len_avg, entry_num});
         }
       }
     }
   }
-  b->ArgNames({"filter_impl", "bits_per_key", "key_len_avg", "entry_num"});
 }
 
 static void FilterBuild(benchmark::State &state) {
   // setup data
-  auto filter = BloomLikeFilterPolicy::Create(
-      BloomLikeFilterPolicy::GetAllFixedImpls().at(state.range(0)),
-      static_cast<double>(state.range(1)));
-  auto tester = std::make_unique<mock::MockBlockBasedTableTester>(filter);
+  auto filter = new BloomFilterPolicy(
+      static_cast<double>(state.range(1)),
+      static_cast<BloomFilterPolicy::Mode>(state.range(0)));
+  auto tester = new mock::MockBlockBasedTableTester(filter);
   KeyMaker km(state.range(2));
   std::unique_ptr<const char[]> owner;
   const int64_t kEntryNum = state.range(3);
@@ -91,10 +92,10 @@ BENCHMARK(FilterBuild)->Apply(CustomArguments);
 
 static void FilterQueryPositive(benchmark::State &state) {
   // setup data
-  auto filter = BloomLikeFilterPolicy::Create(
-      BloomLikeFilterPolicy::GetAllFixedImpls().at(state.range(0)),
-      static_cast<double>(state.range(1)));
-  auto tester = std::make_unique<mock::MockBlockBasedTableTester>(filter);
+  auto filter = new BloomFilterPolicy(
+      static_cast<double>(state.range(1)),
+      static_cast<BloomFilterPolicy::Mode>(state.range(0)));
+  auto tester = new mock::MockBlockBasedTableTester(filter);
   KeyMaker km(state.range(2));
   std::unique_ptr<const char[]> owner;
   const int64_t kEntryNum = state.range(3);
@@ -105,7 +106,7 @@ static void FilterQueryPositive(benchmark::State &state) {
     builder->AddKey(km.Get(filter_num, i));
   }
   auto data = builder->Finish(&owner);
-  std::unique_ptr<FilterBitsReader> reader{filter->GetFilterBitsReader(data)};
+  auto reader = filter->GetFilterBitsReader(data);
 
   // run test
   uint32_t i = 0;
@@ -119,10 +120,10 @@ BENCHMARK(FilterQueryPositive)->Apply(CustomArguments);
 
 static void FilterQueryNegative(benchmark::State &state) {
   // setup data
-  auto filter = BloomLikeFilterPolicy::Create(
-      BloomLikeFilterPolicy::GetAllFixedImpls().at(state.range(0)),
-      static_cast<double>(state.range(1)));
-  auto tester = std::make_unique<mock::MockBlockBasedTableTester>(filter);
+  auto filter = new BloomFilterPolicy(
+      static_cast<double>(state.range(1)),
+      static_cast<BloomFilterPolicy::Mode>(state.range(0)));
+  auto tester = new mock::MockBlockBasedTableTester(filter);
   KeyMaker km(state.range(2));
   std::unique_ptr<const char[]> owner;
   const int64_t kEntryNum = state.range(3);
@@ -133,7 +134,7 @@ static void FilterQueryNegative(benchmark::State &state) {
     builder->AddKey(km.Get(filter_num, i));
   }
   auto data = builder->Finish(&owner);
-  std::unique_ptr<FilterBitsReader> reader{filter->GetFilterBitsReader(data)};
+  auto reader = filter->GetFilterBitsReader(data);
 
   // run test
   uint32_t i = 0;
@@ -145,7 +146,7 @@ static void FilterQueryNegative(benchmark::State &state) {
       fp_cnt++;
     }
   }
-  state.counters["fp_pct"] =
+  state.counters["FP %"] =
       benchmark::Counter(fp_cnt * 100, benchmark::Counter::kAvgIterations);
 }
 BENCHMARK(FilterQueryNegative)->Apply(CustomArguments);

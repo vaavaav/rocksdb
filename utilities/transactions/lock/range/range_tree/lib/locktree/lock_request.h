@@ -140,10 +140,8 @@ class lock_request {
       void (*lock_wait_callback)(void *, lock_wait_infos *) = nullptr,
       void *callback_arg = nullptr,
       void (*after_retry_test_callback)(void) = nullptr);
-  static void retry_all_lock_requests_info(
-      lt_lock_request_info *info,
-      void (*lock_wait_callback)(void *, lock_wait_infos *),
-      void *callback_arg);
+  static void retry_all_lock_requests_info(lt_lock_request_info *info,
+                                           lock_wait_infos *collector);
 
   void set_start_test_callback(void (*f)(void));
   void set_start_before_pending_test_callback(void (*f)(void));

@@ -12,8 +12,8 @@
 #include <cinttypes>
 #include <sstream>
 
+#include "db/blob/blob_file_cache.h"
 #include "db/blob/blob_file_reader.h"
-#include "db/blob/blob_source.h"
 #include "logging/logging.h"
 #include "monitoring/persistent_stats_history.h"
 
@@ -532,7 +532,7 @@ Status VersionEditHandler::MaybeCreateVersion(const VersionEdit& /*edit*/,
     s = builder->SaveTo(v->storage_info());
     if (s.ok()) {
       // Install new version
-      v->PrepareAppend(
+      v->PrepareApply(
           *cfd->GetLatestMutableCFOptions(),
           !(version_set_->db_options_->skip_stats_update_on_db_open));
       version_set_->AppendVersion(cfd, v);
@@ -806,7 +806,7 @@ Status VersionEditHandlerPointInTime::MaybeCreateVersion(
                                 version_set_->current_version_number_++);
     s = builder->SaveTo(version->storage_info());
     if (s.ok()) {
-      version->PrepareAppend(
+      version->PrepareApply(
           *cfd->GetLatestMutableCFOptions(),
           !version_set_->db_options_->skip_stats_update_on_db_open);
       auto v_iter = versions_.find(cfd->GetID());
@@ -831,10 +831,11 @@ Status VersionEditHandlerPointInTime::VerifyFile(const std::string& fpath,
 Status VersionEditHandlerPointInTime::VerifyBlobFile(
     ColumnFamilyData* cfd, uint64_t blob_file_num,
     const BlobFileAddition& blob_addition) {
-  BlobSource* blob_source = cfd->blob_source();
-  assert(blob_source);
+  BlobFileCache* blob_file_cache = cfd->blob_file_cache();
+  assert(blob_file_cache);
   CacheHandleGuard<BlobFileReader> blob_file_reader;
-  Status s = blob_source->GetBlobFileReader(blob_file_num, &blob_file_reader);
+  Status s =
+      blob_file_cache->GetBlobFileReader(blob_file_num, &blob_file_reader);
   if (!s.ok()) {
     return s;
   }

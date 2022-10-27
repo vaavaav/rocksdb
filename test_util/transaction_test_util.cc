@@ -91,12 +91,12 @@ Status RandomTransactionInserter::DBGet(
   Status s;
   // Five digits (since the largest uint16_t is 65535) plus the NUL
   // end char.
-  char prefix_buf[6] = {0};
+  char prefix_buf[6];
   // Pad prefix appropriately so we can iterate over each set
   assert(set_i + 1 <= 9999);
   snprintf(prefix_buf, sizeof(prefix_buf), "%.4u", set_i + 1);
   // key format:  [SET#][random#]
-  std::string skey = std::to_string(ikey);
+  std::string skey = ToString(ikey);
   Slice base_key(skey);
   *full_key = std::string(prefix_buf) + base_key.ToString();
   Slice key(*full_key);
@@ -163,13 +163,9 @@ bool RandomTransactionInserter::DoInsert(DB* db, Transaction* txn,
 
     if (s.ok()) {
       // Increment key
-      std::string sum = std::to_string(int_value + incr);
+      std::string sum = ToString(int_value + incr);
       if (txn != nullptr) {
-        if ((set_i % 4) != 0) {
-          s = txn->SingleDelete(key);
-        } else {
-          s = txn->Delete(key);
-        }
+        s = txn->SingleDelete(key);
         if (!get_for_update && (s.IsBusy() || s.IsTimedOut())) {
           // If the initial get was not for update, then the key is not locked
           // before put and put could fail due to concurrent writes.

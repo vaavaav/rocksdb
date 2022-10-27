@@ -160,12 +160,10 @@ extern bool ParseFileName(const std::string& filename, uint64_t* number,
                           FileType* type, WalFileType* log_type = nullptr);
 
 // Make the CURRENT file point to the descriptor file with the
-// specified number. On its success and when dir_contains_current_file is not
-// nullptr, the function will fsync the directory containing the CURRENT file
-// when
+// specified number.
 extern IOStatus SetCurrentFile(FileSystem* fs, const std::string& dbname,
                                uint64_t descriptor_number,
-                               FSDirectory* dir_contains_current_file);
+                               FSDirectory* directory_to_fsync);
 
 // Make the IDENTITY file for the db
 extern Status SetIdentityFile(Env* env, const std::string& dbname,

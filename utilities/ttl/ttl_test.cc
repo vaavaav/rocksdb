@@ -57,12 +57,12 @@ class TtlTest : public testing::Test {
     options_.max_compaction_bytes = 1;
     // compaction should take place always from level0 for determinism
     db_ttl_ = nullptr;
-    EXPECT_OK(DestroyDB(dbname_, Options()));
+    DestroyDB(dbname_, Options());
   }
 
   ~TtlTest() override {
     CloseTtl();
-    EXPECT_OK(DestroyDB(dbname_, Options()));
+    DestroyDB(dbname_, Options());
   }
 
   // Open database with TTL support when TTL not provided with db_ttl_ pointer
@@ -185,7 +185,6 @@ class TtlTest : public testing::Test {
 
   // Runs a manual compaction
   Status ManualCompact(ColumnFamilyHandle* cf = nullptr) {
-    assert(db_ttl_);
     if (cf == nullptr) {
       return db_ttl_->CompactRange(CompactRangeOptions(), nullptr, nullptr);
     } else {
@@ -895,7 +894,6 @@ TEST_F(TtlOptionsTest, LoadTtlMergeOperator) {
 
 // A black-box test for the ttl wrapper around rocksdb
 int main(int argc, char** argv) {
-  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

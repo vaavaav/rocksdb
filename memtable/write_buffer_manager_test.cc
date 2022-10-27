@@ -77,9 +77,7 @@ TEST_F(WriteBufferManagerTest, ShouldFlush) {
   ASSERT_FALSE(wbf->ShouldFlush());
 }
 
-class ChargeWriteBufferTest : public testing::Test {};
-
-TEST_F(ChargeWriteBufferTest, Basic) {
+TEST_F(WriteBufferManagerTest, CacheCost) {
   constexpr std::size_t kMetaDataChargeOverhead = 10000;
 
   LRUCacheOptions co;
@@ -194,12 +192,12 @@ TEST_F(ChargeWriteBufferTest, Basic) {
   ASSERT_GE(cache->GetPinnedUsage(), 44 * 256 * 1024);
   ASSERT_LT(cache->GetPinnedUsage(), 44 * 256 * 1024 + kMetaDataChargeOverhead);
 
-  // Destroy write buffer manger should free everything
+  // Destory write buffer manger should free everything
   wbf.reset();
   ASSERT_EQ(cache->GetPinnedUsage(), 0);
 }
 
-TEST_F(ChargeWriteBufferTest, BasicWithNoBufferSizeLimit) {
+TEST_F(WriteBufferManagerTest, NoCapCacheCost) {
   constexpr std::size_t kMetaDataChargeOverhead = 10000;
   // 1GB cache
   std::shared_ptr<Cache> cache = NewLRUCache(1024 * 1024 * 1024, 4);
@@ -233,7 +231,7 @@ TEST_F(ChargeWriteBufferTest, BasicWithNoBufferSizeLimit) {
   ASSERT_LT(cache->GetPinnedUsage(), 4 * 256 * 1024 + kMetaDataChargeOverhead);
 }
 
-TEST_F(ChargeWriteBufferTest, BasicWithCacheFull) {
+TEST_F(WriteBufferManagerTest, CacheFull) {
   constexpr std::size_t kMetaDataChargeOverhead = 20000;
 
   // 12MB cache size with strict capacity
@@ -298,7 +296,6 @@ TEST_F(ChargeWriteBufferTest, BasicWithCacheFull) {
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
-  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
