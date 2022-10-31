@@ -124,8 +124,8 @@ class VolatileCacheTier : public PersistentCacheTier {
     }
   };
 
-  using IndexType =
-      EvictableHashTable<CacheData, CacheDataHash, CacheDataEqual>;
+  typedef EvictableHashTable<CacheData, CacheDataHash, CacheDataEqual>
+      IndexType;
 
   // Evict LRU tail
   bool Evict();

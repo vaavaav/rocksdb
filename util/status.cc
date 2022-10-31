@@ -58,8 +58,9 @@ static const char* msgs[static_cast<int>(Status::kMaxSubCode)] = {
 };
 
 Status::Status(Code _code, SubCode _subcode, const Slice& msg,
-               const Slice& msg2, Severity sev)
-    : code_(_code), subcode_(_subcode), sev_(sev) {
+               const Slice& msg2)
+    : code_(_code), subcode_(_subcode), sev_(kNoError) {
+  assert(code_ != kOk);
   assert(subcode_ != kMaxSubCode);
   const size_t len1 = msg.size();
   const size_t len2 = msg2.size();
@@ -79,7 +80,8 @@ std::string Status::ToString() const {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
   checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  const char* type = nullptr;
+  char tmp[30];
+  const char* type;
   switch (code_) {
     case kOk:
       return "OK";
@@ -122,24 +124,14 @@ std::string Status::ToString() const {
     case kTryAgain:
       type = "Operation failed. Try again.: ";
       break;
-    case kCompactionTooLarge:
-      type = "Compaction too large: ";
-      break;
     case kColumnFamilyDropped:
       type = "Column family dropped: ";
       break;
-    case kMaxCode:
-      assert(false);
+    default:
+      snprintf(tmp, sizeof(tmp), "Unknown code(%d): ",
+               static_cast<int>(code()));
+      type = tmp;
       break;
-  }
-  char tmp[30];
-  if (type == nullptr) {
-    // This should not happen since `code_` should be a valid non-`kMaxCode`
-    // member of the `Code` enum. The above switch-statement should have had a
-    // case assigning `type` to a corresponding string.
-    assert(false);
-    snprintf(tmp, sizeof(tmp), "Unknown code(%d): ", static_cast<int>(code()));
-    type = tmp;
   }
   std::string result(type);
   if (subcode_ != kNone) {
@@ -149,9 +141,6 @@ std::string Status::ToString() const {
   }
 
   if (state_ != nullptr) {
-    if (subcode_ != kNone) {
-      result.append(": ");
-    }
     result.append(state_);
   }
   return result;

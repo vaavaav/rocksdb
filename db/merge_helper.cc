@@ -7,10 +7,6 @@
 
 #include <string>
 
-#include "db/blob/blob_fetcher.h"
-#include "db/blob/blob_index.h"
-#include "db/blob/prefetch_buffer_collection.h"
-#include "db/compaction/compaction_iteration_stats.h"
 #include "db/dbformat.h"
 #include "monitoring/perf_context_imp.h"
 #include "monitoring/statistics.h"
@@ -18,7 +14,6 @@
 #include "rocksdb/comparator.h"
 #include "rocksdb/db.h"
 #include "rocksdb/merge_operator.h"
-#include "rocksdb/system_clock.h"
 #include "table/format.h"
 #include "table/internal_iterator.h"
 
@@ -33,7 +28,6 @@ MergeHelper::MergeHelper(Env* env, const Comparator* user_comparator,
                          Statistics* stats,
                          const std::atomic<bool>* shutting_down)
     : env_(env),
-      clock_(env->GetSystemClock().get()),
       user_comparator_(user_comparator),
       user_merge_operator_(user_merge_operator),
       compaction_filter_(compaction_filter),
@@ -45,7 +39,7 @@ MergeHelper::MergeHelper(Env* env, const Comparator* user_comparator,
       snapshot_checker_(snapshot_checker),
       level_(level),
       keys_(),
-      filter_timer_(clock_),
+      filter_timer_(env_),
       total_filter_time_(0U),
       stats_(stats) {
   assert(user_comparator_ != nullptr);
@@ -58,7 +52,7 @@ Status MergeHelper::TimedFullMerge(const MergeOperator* merge_operator,
                                    const Slice& key, const Slice* value,
                                    const std::vector<Slice>& operands,
                                    std::string* result, Logger* logger,
-                                   Statistics* statistics, SystemClock* clock,
+                                   Statistics* statistics, Env* env,
                                    Slice* result_operand,
                                    bool update_num_ops_stats) {
   assert(merge_operator != nullptr);
@@ -81,7 +75,7 @@ Status MergeHelper::TimedFullMerge(const MergeOperator* merge_operator,
   MergeOperator::MergeOperationOutput merge_out(*result, tmp_result_operand);
   {
     // Setup to time the merge
-    StopWatchNano timer(clock, statistics != nullptr);
+    StopWatchNano timer(env, statistics != nullptr);
     PERF_TIMER_GUARD(merge_operator_time_nanos);
 
     // Do the merge
@@ -123,10 +117,7 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
                                CompactionRangeDelAggregator* range_del_agg,
                                const SequenceNumber stop_before,
                                const bool at_bottom,
-                               const bool allow_data_in_errors,
-                               const BlobFetcher* blob_fetcher,
-                               PrefetchBufferCollection* prefetch_buffers,
-                               CompactionIterationStats* c_iter_stats) {
+                               const bool allow_data_in_errors) {
   // Get a copy of the internal key, before it's invalidated by iter->Next()
   // Also maintain the list of merge operands seen.
   assert(HasOperator());
@@ -192,6 +183,7 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
 
     assert(IsValueType(ikey.type));
     if (ikey.type != kTypeMerge) {
+
       // hit a put/delete/single delete
       //   => merge the put value or a nullptr with operands_
       //   => store result in operands_.back() (and update keys_.back())
@@ -210,52 +202,19 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
       // want. Also if we're in compaction and it's a put, it would be nice to
       // run compaction filter on it.
       const Slice val = iter->value();
-      PinnableSlice blob_value;
       const Slice* val_ptr;
-      if ((kTypeValue == ikey.type || kTypeBlobIndex == ikey.type) &&
+      if (kTypeValue == ikey.type &&
           (range_del_agg == nullptr ||
            !range_del_agg->ShouldDelete(
                ikey, RangeDelPositioningMode::kForwardTraversal))) {
-        if (ikey.type == kTypeBlobIndex) {
-          BlobIndex blob_index;
-
-          s = blob_index.DecodeFrom(val);
-          if (!s.ok()) {
-            return s;
-          }
-
-          FilePrefetchBuffer* prefetch_buffer =
-              prefetch_buffers ? prefetch_buffers->GetOrCreatePrefetchBuffer(
-                                     blob_index.file_number())
-                               : nullptr;
-
-          uint64_t bytes_read = 0;
-
-          assert(blob_fetcher);
-
-          s = blob_fetcher->FetchBlob(ikey.user_key, blob_index,
-                                      prefetch_buffer, &blob_value,
-                                      &bytes_read);
-          if (!s.ok()) {
-            return s;
-          }
-
-          val_ptr = &blob_value;
-
-          if (c_iter_stats) {
-            ++c_iter_stats->num_blobs_read;
-            c_iter_stats->total_blob_bytes_read += bytes_read;
-          }
-        } else {
-          val_ptr = &val;
-        }
+        val_ptr = &val;
       } else {
         val_ptr = nullptr;
       }
       std::string merge_result;
       s = TimedFullMerge(user_merge_operator_, ikey.user_key, val_ptr,
                          merge_context_.GetOperands(), &merge_result, logger_,
-                         stats_, clock_);
+                         stats_, env_);
 
       // We store the result in keys_.back() and operands_.back()
       // if nothing went wrong (i.e.: no operand corruption on disk)
@@ -366,7 +325,7 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
     std::string merge_result;
     s = TimedFullMerge(user_merge_operator_, orig_ikey.user_key, nullptr,
                        merge_context_.GetOperands(), &merge_result, logger_,
-                       stats_, clock_);
+                       stats_, env_);
     if (s.ok()) {
       // The original key encountered
       // We are certain that keys_ is not empty here (see assertions couple of
@@ -389,7 +348,7 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
       bool merge_success = false;
       std::string merge_result;
       {
-        StopWatchNano timer(clock_, stats_ != nullptr);
+        StopWatchNano timer(env_, stats_ != nullptr);
         PERF_TIMER_GUARD(merge_operator_time_nanos);
         merge_success = user_merge_operator_->PartialMergeMulti(
             orig_ikey.user_key,
@@ -455,9 +414,7 @@ CompactionFilter::Decision MergeHelper::FilterMerge(const Slice& user_key,
                                                        kValueTypeForSeek);
     }
   }
-  if (stats_ != nullptr && ShouldReportDetailedTime(env_, stats_)) {
-    total_filter_time_ += filter_timer_.ElapsedNanosSafe();
-  }
+  total_filter_time_ += filter_timer_.ElapsedNanosSafe();
   return ret;
 }
 

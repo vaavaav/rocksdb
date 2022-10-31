@@ -511,9 +511,9 @@ TEST_F(DBIteratorStressTest, StressTest) {
                       target_hidden_fraction;
                   internal_iter->trace = trace;
                   db_iter.reset(NewDBIterator(
-                      env_, ropt, ImmutableOptions(options),
+                      env_, ropt, ImmutableCFOptions(options),
                       MutableCFOptions(options), BytewiseComparator(),
-                      internal_iter, nullptr /* version */, sequence,
+                      internal_iter, sequence,
                       options.max_sequential_skip_in_iterations,
                       nullptr /*read_callback*/));
                 }

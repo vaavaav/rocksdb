@@ -16,7 +16,6 @@
 #include "db/version_set.h"
 #include "file/writable_file_writer.h"
 #include "rocksdb/cache.h"
-#include "rocksdb/file_system.h"
 #include "rocksdb/write_buffer_manager.h"
 #include "table/mock_table.h"
 #include "test_util/testharness.h"
@@ -33,7 +32,7 @@ class FlushJobTestBase : public testing::Test {
  protected:
   FlushJobTestBase(std::string dbname, const Comparator* ucmp)
       : env_(Env::Default()),
-        fs_(env_->GetFileSystem()),
+        fs_(std::make_shared<LegacyFileSystemWrapper>(env_)),
         dbname_(std::move(dbname)),
         ucmp_(ucmp),
         options_(),
@@ -48,14 +47,12 @@ class FlushJobTestBase : public testing::Test {
     if (getenv("KEEP_DB")) {
       fprintf(stdout, "db is still in %s\n", dbname_.c_str());
     } else {
-      // destroy versions_ to release all file handles
-      versions_.reset();
       EXPECT_OK(DestroyDir(env_, dbname_));
     }
   }
 
   void NewDB() {
-    ASSERT_OK(SetIdentityFile(env_, dbname_));
+    SetIdentityFile(env_, dbname_);
     VersionEdit new_db;
 
     new_db.SetLogNumber(0);
@@ -77,19 +74,17 @@ class FlushJobTestBase : public testing::Test {
     }
 
     const std::string manifest = DescriptorFileName(dbname_, 1);
-    const auto& fs = env_->GetFileSystem();
-    std::unique_ptr<WritableFileWriter> file_writer;
-    Status s = WritableFileWriter::Create(
-        fs, manifest, fs->OptimizeForManifestWrite(env_options_), &file_writer,
-        nullptr);
+    std::unique_ptr<WritableFile> file;
+    Status s = env_->NewWritableFile(
+        manifest, &file, env_->OptimizeForManifestWrite(env_options_));
     ASSERT_OK(s);
-
+    std::unique_ptr<WritableFileWriter> file_writer(new WritableFileWriter(
+        NewLegacyWritableFileWrapper(std::move(file)), manifest, EnvOptions()));
     {
       log::Writer log(std::move(file_writer), 0, false);
       std::string record;
       new_db.EncodeTo(&record);
       s = log.AddRecord(record);
-      ASSERT_OK(s);
 
       for (const auto& e : new_cfs) {
         record.clear();
@@ -127,8 +122,7 @@ class FlushJobTestBase : public testing::Test {
     versions_.reset(
         new VersionSet(dbname_, &db_options_, env_options_, table_cache_.get(),
                        &write_buffer_manager_, &write_controller_,
-                       /*block_cache_tracer=*/nullptr, /*io_tracer=*/nullptr,
-                       /*db_session_id*/ ""));
+                       /*block_cache_tracer=*/nullptr, /*io_tracer=*/nullptr));
     EXPECT_OK(versions_->Recover(column_families, false));
   }
 
@@ -164,7 +158,7 @@ TEST_F(FlushJobTest, Empty) {
   SnapshotChecker* snapshot_checker = nullptr;  // not relavant
   FlushJob flush_job(
       dbname_, versions_->GetColumnFamilySet()->GetDefault(), db_options_,
-      *cfd->GetLatestMutableCFOptions(), port::kMaxUint64 /* memtable_id */,
+      *cfd->GetLatestMutableCFOptions(), nullptr /* memtable_id */,
       env_options_, versions_.get(), &mutex_, &shutting_down_, {},
       kMaxSequenceNumber, snapshot_checker, &job_context, nullptr, nullptr,
       nullptr, kNoCompression, nullptr, &event_logger, false,
@@ -193,8 +187,7 @@ TEST_F(FlushJobTest, NonEmpty) {
   for (int i = 1; i < 10000; ++i) {
     std::string key(ToString((i + 1000) % 10000));
     std::string value("value" + key);
-    ASSERT_OK(new_mem->Add(SequenceNumber(i), kTypeValue, key, value,
-                           nullptr /* kv_prot_info */));
+    new_mem->Add(SequenceNumber(i), kTypeValue, key, value);
     if ((i + 1000) % 10000 < 9995) {
       InternalKey internal_key(key, SequenceNumber(i), kTypeValue);
       inserted_keys.push_back({internal_key.Encode().ToString(), value});
@@ -202,8 +195,7 @@ TEST_F(FlushJobTest, NonEmpty) {
   }
 
   {
-    ASSERT_OK(new_mem->Add(SequenceNumber(10000), kTypeRangeDeletion, "9995",
-                           "9999a", nullptr /* kv_prot_info */));
+    new_mem->Add(SequenceNumber(10000), kTypeRangeDeletion, "9995", "9999a");
     InternalKey internal_key("9995", SequenceNumber(10000), kTypeRangeDeletion);
     inserted_keys.push_back({internal_key.Encode().ToString(), "9999a"});
   }
@@ -230,8 +222,7 @@ TEST_F(FlushJobTest, NonEmpty) {
     }
 
     const SequenceNumber seq(i + 10001);
-    ASSERT_OK(new_mem->Add(seq, kTypeBlobIndex, key, blob_index,
-                           nullptr /* kv_prot_info */));
+    new_mem->Add(seq, kTypeBlobIndex, key, blob_index);
 
     InternalKey internal_key(key, seq, kTypeBlobIndex);
     inserted_keys.push_back({internal_key.Encode().ToString(), blob_index});
@@ -248,7 +239,7 @@ TEST_F(FlushJobTest, NonEmpty) {
   SnapshotChecker* snapshot_checker = nullptr;  // not relavant
   FlushJob flush_job(
       dbname_, versions_->GetColumnFamilySet()->GetDefault(), db_options_,
-      *cfd->GetLatestMutableCFOptions(), port::kMaxUint64 /* memtable_id */,
+      *cfd->GetLatestMutableCFOptions(), nullptr /* memtable_id */,
       env_options_, versions_.get(), &mutex_, &shutting_down_, {},
       kMaxSequenceNumber, snapshot_checker, &job_context, nullptr, nullptr,
       nullptr, kNoCompression, db_options_.statistics.get(), &event_logger,
@@ -292,8 +283,8 @@ TEST_F(FlushJobTest, FlushMemTablesSingleColumnFamily) {
     for (size_t j = 0; j < num_keys_per_table; ++j) {
       std::string key(ToString(j + i * num_keys_per_table));
       std::string value("value" + key);
-      ASSERT_OK(mem->Add(SequenceNumber(j + i * num_keys_per_table), kTypeValue,
-                         key, value, nullptr /* kv_prot_info */));
+      mem->Add(SequenceNumber(j + i * num_keys_per_table), kTypeValue, key,
+               value);
     }
   }
 
@@ -310,7 +301,7 @@ TEST_F(FlushJobTest, FlushMemTablesSingleColumnFamily) {
   uint64_t flush_memtable_id = smallest_memtable_id + num_mems_to_flush - 1;
   FlushJob flush_job(
       dbname_, versions_->GetColumnFamilySet()->GetDefault(), db_options_,
-      *cfd->GetLatestMutableCFOptions(), flush_memtable_id, env_options_,
+      *cfd->GetLatestMutableCFOptions(), &flush_memtable_id, env_options_,
       versions_.get(), &mutex_, &shutting_down_, {}, kMaxSequenceNumber,
       snapshot_checker, &job_context, nullptr, nullptr, nullptr, kNoCompression,
       db_options_.statistics.get(), &event_logger, true,
@@ -365,8 +356,7 @@ TEST_F(FlushJobTest, FlushMemtablesMultipleColumnFamilies) {
       for (size_t j = 0; j != num_keys_per_memtable; ++j) {
         std::string key(ToString(j + i * num_keys_per_memtable));
         std::string value("value" + key);
-        ASSERT_OK(mem->Add(curr_seqno++, kTypeValue, key, value,
-                           nullptr /* kv_prot_info */));
+        mem->Add(curr_seqno++, kTypeValue, key, value);
       }
 
       cfd->imm()->Add(mem, &to_delete);
@@ -383,7 +373,7 @@ TEST_F(FlushJobTest, FlushMemtablesMultipleColumnFamilies) {
     std::vector<SequenceNumber> snapshot_seqs;
     flush_jobs.emplace_back(new FlushJob(
         dbname_, cfd, db_options_, *cfd->GetLatestMutableCFOptions(),
-        memtable_ids[k], env_options_, versions_.get(), &mutex_,
+        &memtable_ids[k], env_options_, versions_.get(), &mutex_,
         &shutting_down_, snapshot_seqs, kMaxSequenceNumber, snapshot_checker,
         &job_context, nullptr, nullptr, nullptr, kNoCompression,
         db_options_.statistics.get(), &event_logger, true,
@@ -418,18 +408,10 @@ TEST_F(FlushJobTest, FlushMemtablesMultipleColumnFamilies) {
   for (auto cfd : all_cfds) {
     mutable_cf_options_list.push_back(cfd->GetLatestMutableCFOptions());
   }
-  autovector<std::list<std::unique_ptr<FlushJobInfo>>*>
-      committed_flush_jobs_info;
-#ifndef ROCKSDB_LITE
-  for (auto& job : flush_jobs) {
-    committed_flush_jobs_info.push_back(job->GetCommittedFlushJobsInfo());
-  }
-#endif  //! ROCKSDB_LITE
 
   Status s = InstallMemtableAtomicFlushResults(
       nullptr /* imm_lists */, all_cfds, mutable_cf_options_list, mems_list,
-      versions_.get(), nullptr /* prep_tracker */, &mutex_, file_meta_ptrs,
-      committed_flush_jobs_info, &job_context.memtables_to_free,
+      versions_.get(), &mutex_, file_meta_ptrs, &job_context.memtables_to_free,
       nullptr /* db_directory */, nullptr /* log_buffer */);
   ASSERT_OK(s);
 
@@ -484,8 +466,7 @@ TEST_F(FlushJobTest, Snapshots) {
     for (int j = 0; j < insertions; ++j) {
       std::string value(rnd.HumanReadableString(10));
       auto seqno = ++current_seqno;
-      ASSERT_OK(new_mem->Add(SequenceNumber(seqno), kTypeValue, key, value,
-                             nullptr /* kv_prot_info */));
+      new_mem->Add(SequenceNumber(seqno), kTypeValue, key, value);
       // a key is visible only if:
       // 1. it's the last one written (j == insertions - 1)
       // 2. there's a snapshot pointing at it
@@ -509,7 +490,7 @@ TEST_F(FlushJobTest, Snapshots) {
   SnapshotChecker* snapshot_checker = nullptr;  // not relavant
   FlushJob flush_job(
       dbname_, versions_->GetColumnFamilySet()->GetDefault(), db_options_,
-      *cfd->GetLatestMutableCFOptions(), port::kMaxUint64 /* memtable_id */,
+      *cfd->GetLatestMutableCFOptions(), nullptr /* memtable_id */,
       env_options_, versions_.get(), &mutex_, &shutting_down_, snapshots,
       kMaxSequenceNumber, snapshot_checker, &job_context, nullptr, nullptr,
       nullptr, kNoCompression, db_options_.statistics.get(), &event_logger,
@@ -537,8 +518,7 @@ class FlushJobTimestampTest : public FlushJobTestBase {
                              Slice value) {
     std::string key_str(std::move(key));
     PutFixed64(&key_str, ts);
-    ASSERT_OK(memtable->Add(seq, value_type, key_str, value,
-                            nullptr /* kv_prot_info */));
+    memtable->Add(seq, value_type, key_str, value);
   }
 
  protected:
@@ -577,8 +557,8 @@ TEST_F(FlushJobTimestampTest, AllKeysExpired) {
   PutFixed64(&full_history_ts_low, std::numeric_limits<uint64_t>::max());
   FlushJob flush_job(
       dbname_, cfd, db_options_, *cfd->GetLatestMutableCFOptions(),
-      port::kMaxUint64 /* memtable_id */, env_options_, versions_.get(),
-      &mutex_, &shutting_down_, snapshots, kMaxSequenceNumber, snapshot_checker,
+      nullptr /* memtable_id */, env_options_, versions_.get(), &mutex_,
+      &shutting_down_, snapshots, kMaxSequenceNumber, snapshot_checker,
       &job_context, nullptr, nullptr, nullptr, kNoCompression,
       db_options_.statistics.get(), &event_logger, true,
       true /* sync_output_directory */, true /* write_manifest */,
@@ -628,8 +608,8 @@ TEST_F(FlushJobTimestampTest, NoKeyExpired) {
   PutFixed64(&full_history_ts_low, 0);
   FlushJob flush_job(
       dbname_, cfd, db_options_, *cfd->GetLatestMutableCFOptions(),
-      port::kMaxUint64 /* memtable_id */, env_options_, versions_.get(),
-      &mutex_, &shutting_down_, snapshots, kMaxSequenceNumber, snapshot_checker,
+      nullptr /* memtable_id */, env_options_, versions_.get(), &mutex_,
+      &shutting_down_, snapshots, kMaxSequenceNumber, snapshot_checker,
       &job_context, nullptr, nullptr, nullptr, kNoCompression,
       db_options_.statistics.get(), &event_logger, true,
       true /* sync_output_directory */, true /* write_manifest */,

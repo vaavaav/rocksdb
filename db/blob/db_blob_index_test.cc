@@ -41,7 +41,8 @@ class DBBlobIndexTest : public DBTestBase {
                                        Tier::kImmutableMemtables,
                                        Tier::kL0SstFile, Tier::kLnSstFile};
 
-  DBBlobIndexTest() : DBTestBase("db_blob_index_test", /*env_do_fsync=*/true) {}
+  DBBlobIndexTest()
+      : DBTestBase("/db_blob_index_test", /*env_do_fsync=*/true) {}
 
   ColumnFamilyHandle* cfh() { return dbfull()->DefaultColumnFamily(); }
 
@@ -97,7 +98,7 @@ class DBBlobIndexTest : public DBTestBase {
   ArenaWrappedDBIter* GetBlobIterator() {
     return dbfull()->NewIteratorImpl(
         ReadOptions(), cfd(), dbfull()->GetLatestSequenceNumber(),
-        nullptr /*read_callback*/, true /*expose_blob_index*/);
+        nullptr /*read_callback*/, true /*allow_blob*/);
   }
 
   Options GetTestOptions() {
@@ -237,11 +238,8 @@ TEST_F(DBBlobIndexTest, Updated) {
   }
 }
 
-// Note: the following test case pertains to the StackableDB-based BlobDB
-// implementation. When a blob iterator is used, it should set the
-// expose_blob_index flag for the underlying DBIter, and retrieve/return the
-// corresponding blob value. If a regular DBIter is created (i.e.
-// expose_blob_index is not set), it should return Status::Corruption.
+// Iterator should get blob value if allow_blob flag is set,
+// otherwise return Status::NotSupported status.
 TEST_F(DBBlobIndexTest, Iterate) {
   const std::vector<std::vector<ValueType>> data = {
       /*00*/ {kTypeValue},
@@ -304,7 +302,6 @@ TEST_F(DBBlobIndexTest, Iterate) {
                     std::function<void(Iterator*)> extra_check = nullptr) {
     // Seek
     auto* iterator = create_iterator();
-    ASSERT_OK(iterator->status());
     ASSERT_OK(iterator->Refresh());
     iterator->Seek(get_key(index));
     check_iterator(iterator, expected_status, forward_value);
@@ -318,7 +315,6 @@ TEST_F(DBBlobIndexTest, Iterate) {
     ASSERT_OK(iterator->Refresh());
     iterator->Seek(get_key(index - 1));
     ASSERT_TRUE(iterator->Valid());
-    ASSERT_OK(iterator->status());
     iterator->Next();
     check_iterator(iterator, expected_status, forward_value);
     if (extra_check) {
@@ -328,7 +324,6 @@ TEST_F(DBBlobIndexTest, Iterate) {
 
     // SeekForPrev
     iterator = create_iterator();
-    ASSERT_OK(iterator->status());
     ASSERT_OK(iterator->Refresh());
     iterator->SeekForPrev(get_key(index));
     check_iterator(iterator, expected_status, backward_value);
@@ -341,7 +336,6 @@ TEST_F(DBBlobIndexTest, Iterate) {
     iterator = create_iterator();
     iterator->Seek(get_key(index + 1));
     ASSERT_TRUE(iterator->Valid());
-    ASSERT_OK(iterator->status());
     iterator->Prev();
     check_iterator(iterator, expected_status, backward_value);
     if (extra_check) {
@@ -379,7 +373,7 @@ TEST_F(DBBlobIndexTest, Iterate) {
             ASSERT_OK(Write(&batch));
             break;
           default:
-            FAIL();
+            assert(false);
         };
       }
       snapshots.push_back(dbfull()->GetSnapshot());
@@ -390,15 +384,15 @@ TEST_F(DBBlobIndexTest, Iterate) {
     MoveDataTo(tier);
 
     // Normal iterator
-    verify(1, Status::kCorruption, "", "", create_normal_iterator);
-    verify(3, Status::kCorruption, "", "", create_normal_iterator);
+    verify(1, Status::kNotSupported, "", "", create_normal_iterator);
+    verify(3, Status::kNotSupported, "", "", create_normal_iterator);
     verify(5, Status::kOk, get_value(5, 0), get_value(5, 0),
            create_normal_iterator);
     verify(7, Status::kOk, get_value(8, 0), get_value(6, 0),
            create_normal_iterator);
     verify(9, Status::kOk, get_value(10, 0), get_value(8, 0),
            create_normal_iterator);
-    verify(11, Status::kCorruption, "", "", create_normal_iterator);
+    verify(11, Status::kNotSupported, "", "", create_normal_iterator);
     verify(13, Status::kOk,
            get_value(13, 2) + "," + get_value(13, 1) + "," + get_value(13, 0),
            get_value(13, 2) + "," + get_value(13, 1) + "," + get_value(13, 0),
@@ -417,11 +411,7 @@ TEST_F(DBBlobIndexTest, Iterate) {
            create_blob_iterator, check_is_blob(false));
     verify(9, Status::kOk, get_value(10, 0), get_value(8, 0),
            create_blob_iterator, check_is_blob(false));
-    if (tier <= kImmutableMemtables) {
-      verify(11, Status::kNotSupported, "", "", create_blob_iterator);
-    } else {
-      verify(11, Status::kCorruption, "", "", create_blob_iterator);
-    }
+    verify(11, Status::kNotSupported, "", "", create_blob_iterator);
     verify(13, Status::kOk,
            get_value(13, 2) + "," + get_value(13, 1) + "," + get_value(13, 0),
            get_value(13, 2) + "," + get_value(13, 1) + "," + get_value(13, 0),
@@ -443,11 +433,7 @@ TEST_F(DBBlobIndexTest, Iterate) {
            create_blob_iterator, check_is_blob(false));
     verify(9, Status::kOk, get_value(10, 0), get_value(8, 0),
            create_blob_iterator, check_is_blob(false));
-    if (tier <= kImmutableMemtables) {
-      verify(11, Status::kNotSupported, "", "", create_blob_iterator);
-    } else {
-      verify(11, Status::kCorruption, "", "", create_blob_iterator);
-    }
+    verify(11, Status::kNotSupported, "", "", create_blob_iterator);
     verify(13, Status::kOk,
            get_value(13, 2) + "," + get_value(13, 1) + "," + get_value(13, 0),
            get_value(13, 2) + "," + get_value(13, 1) + "," + get_value(13, 0),
@@ -462,111 +448,10 @@ TEST_F(DBBlobIndexTest, Iterate) {
   }
 }
 
-TEST_F(DBBlobIndexTest, IntegratedBlobIterate) {
-  const std::vector<std::vector<std::string>> data = {
-      /*00*/ {"Put"},
-      /*01*/ {"Put", "Merge", "Merge", "Merge"},
-      /*02*/ {"Put"}};
-
-  auto get_key = [](size_t index) { return ("key" + std::to_string(index)); };
-
-  auto get_value = [&](size_t index, size_t version) {
-    return get_key(index) + "_value" + ToString(version);
-  };
-
-  auto check_iterator = [&](Iterator* iterator, Status expected_status,
-                            const Slice& expected_value) {
-    ASSERT_EQ(expected_status, iterator->status());
-    if (expected_status.ok()) {
-      ASSERT_TRUE(iterator->Valid());
-      ASSERT_EQ(expected_value, iterator->value());
-    } else {
-      ASSERT_FALSE(iterator->Valid());
-    }
-  };
-
-  auto verify = [&](size_t index, Status expected_status,
-                    const Slice& expected_value) {
-    // Seek
-    {
-      Iterator* iterator = db_->NewIterator(ReadOptions());
-      std::unique_ptr<Iterator> iterator_guard(iterator);
-      ASSERT_OK(iterator->status());
-      ASSERT_OK(iterator->Refresh());
-      iterator->Seek(get_key(index));
-      check_iterator(iterator, expected_status, expected_value);
-    }
-    // Next
-    {
-      Iterator* iterator = db_->NewIterator(ReadOptions());
-      std::unique_ptr<Iterator> iterator_guard(iterator);
-      ASSERT_OK(iterator->Refresh());
-      iterator->Seek(get_key(index - 1));
-      ASSERT_TRUE(iterator->Valid());
-      ASSERT_OK(iterator->status());
-      iterator->Next();
-      check_iterator(iterator, expected_status, expected_value);
-    }
-    // SeekForPrev
-    {
-      Iterator* iterator = db_->NewIterator(ReadOptions());
-      std::unique_ptr<Iterator> iterator_guard(iterator);
-      ASSERT_OK(iterator->status());
-      ASSERT_OK(iterator->Refresh());
-      iterator->SeekForPrev(get_key(index));
-      check_iterator(iterator, expected_status, expected_value);
-    }
-    // Prev
-    {
-      Iterator* iterator = db_->NewIterator(ReadOptions());
-      std::unique_ptr<Iterator> iterator_guard(iterator);
-      iterator->Seek(get_key(index + 1));
-      ASSERT_TRUE(iterator->Valid());
-      ASSERT_OK(iterator->status());
-      iterator->Prev();
-      check_iterator(iterator, expected_status, expected_value);
-    }
-  };
-
-  Options options = GetTestOptions();
-  options.enable_blob_files = true;
-  options.min_blob_size = 0;
-
-  DestroyAndReopen(options);
-
-  // fill data
-  for (size_t i = 0; i < data.size(); i++) {
-    for (size_t j = 0; j < data[i].size(); j++) {
-      std::string key = get_key(i);
-      std::string value = get_value(i, j);
-      if (data[i][j] == "Put") {
-        ASSERT_OK(Put(key, value));
-        ASSERT_OK(Flush());
-      } else if (data[i][j] == "Merge") {
-        ASSERT_OK(Merge(key, value));
-        ASSERT_OK(Flush());
-      }
-    }
-  }
-
-  std::string expected_value = get_value(1, 0) + "," + get_value(1, 1) + "," +
-                               get_value(1, 2) + "," + get_value(1, 3);
-  Status expected_status;
-  verify(1, expected_status, expected_value);
-
-#ifndef ROCKSDB_LITE
-  // Test DBIter::FindValueForCurrentKeyUsingSeek flow.
-  ASSERT_OK(dbfull()->SetOptions(cfh(),
-                                 {{"max_sequential_skip_in_iterations", "0"}}));
-  verify(1, expected_status, expected_value);
-#endif  // !ROCKSDB_LITE
-}
-
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
   ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
-  RegisterCustomObjects(argc, argv);
   return RUN_ALL_TESTS();
 }

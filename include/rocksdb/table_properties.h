@@ -5,12 +5,8 @@
 #pragma once
 
 #include <stdint.h>
-
 #include <map>
-#include <memory>
 #include <string>
-
-#include "rocksdb/customizable.h"
 #include "rocksdb/status.h"
 #include "rocksdb/types.h"
 
@@ -30,14 +26,13 @@ namespace ROCKSDB_NAMESPACE {
 //      ++pos) {
 //   ...
 // }
-using UserCollectedProperties = std::map<std::string, std::string>;
+typedef std::map<std::string, std::string> UserCollectedProperties;
 
 // table properties' human-readable names in the property block.
 struct TablePropertiesNames {
   static const std::string kDbId;
   static const std::string kDbSessionId;
   static const std::string kDbHostId;
-  static const std::string kOriginalFileNumber;
   static const std::string kDataSize;
   static const std::string kIndexSize;
   static const std::string kIndexPartitions;
@@ -49,7 +44,6 @@ struct TablePropertiesNames {
   static const std::string kRawValueSize;
   static const std::string kNumDataBlocks;
   static const std::string kNumEntries;
-  static const std::string kNumFilterEntries;
   static const std::string kDeletedKeys;
   static const std::string kMergeOperands;
   static const std::string kNumRangeDeletions;
@@ -67,23 +61,18 @@ struct TablePropertiesNames {
   static const std::string kCreationTime;
   static const std::string kOldestKeyTime;
   static const std::string kFileCreationTime;
-  static const std::string kSlowCompressionEstimatedDataSize;
-  static const std::string kFastCompressionEstimatedDataSize;
 };
+
+extern const std::string kPropertiesBlock;
+extern const std::string kCompressionDictBlock;
+extern const std::string kRangeDelBlock;
 
 // `TablePropertiesCollector` provides the mechanism for users to collect
 // their own properties that they are interested in. This class is essentially
 // a collection of callback functions that will be invoked during table
 // building. It is constructed with TablePropertiesCollectorFactory. The methods
 // don't need to be thread-safe, as we will create exactly one
-// TablePropertiesCollector object per table and then call it sequentially.
-//
-// Statuses from these callbacks are currently logged when not OK, but
-// otherwise ignored by RocksDB.
-//
-// Exceptions MUST NOT propagate out of overridden functions into RocksDB,
-// because RocksDB is not exception-safe. This could cause undefined behavior
-// including data loss, unreported corruption, deadlocks, and more.
+// TablePropertiesCollector object per table and then call it sequentially
 class TablePropertiesCollector {
  public:
   virtual ~TablePropertiesCollector() {}
@@ -110,9 +99,9 @@ class TablePropertiesCollector {
   }
 
   // Called after each new block is cut
-  virtual void BlockAdd(uint64_t /* block_raw_bytes */,
-                        uint64_t /* block_compressed_bytes_fast */,
-                        uint64_t /* block_compressed_bytes_slow */) {
+  virtual void BlockAdd(uint64_t /* blockRawBytes */,
+                        uint64_t /* blockCompressedBytesFast */,
+                        uint64_t /* blockCompressedBytesSlow */) {
     // Nothing to do here. Callback registers can override.
     return;
   }
@@ -136,33 +125,20 @@ class TablePropertiesCollector {
 
 // Constructs TablePropertiesCollector. Internals create a new
 // TablePropertiesCollector for each new table
-//
-// Exceptions MUST NOT propagate out of overridden functions into RocksDB,
-// because RocksDB is not exception-safe. This could cause undefined behavior
-// including data loss, unreported corruption, deadlocks, and more.
-class TablePropertiesCollectorFactory : public Customizable {
+class TablePropertiesCollectorFactory {
  public:
   struct Context {
     uint32_t column_family_id;
-    // The level at creating the SST file (i.e, table), of which the
-    // properties are being collected.
-    int level_at_creation = kUnknownLevelAtCreation;
     static const uint32_t kUnknownColumnFamily;
-    static const int kUnknownLevelAtCreation = -1;
   };
 
-  ~TablePropertiesCollectorFactory() override {}
-  static const char* Type() { return "TablePropertiesCollectorFactory"; }
-  static Status CreateFromString(
-      const ConfigOptions& options, const std::string& value,
-      std::shared_ptr<TablePropertiesCollectorFactory>* result);
-
+  virtual ~TablePropertiesCollectorFactory() {}
   // has to be thread-safe
   virtual TablePropertiesCollector* CreateTablePropertiesCollector(
       TablePropertiesCollectorFactory::Context context) = 0;
 
   // The name of the properties collector can be used for debugging purpose.
-  const char* Name() const override = 0;
+  virtual const char* Name() const = 0;
 
   // Can be overridden by sub-classes to return the Name, followed by
   // configuration info that will // be logged to the info log when the
@@ -174,9 +150,6 @@ class TablePropertiesCollectorFactory : public Customizable {
 // table.
 struct TableProperties {
  public:
-  // the file number at creation time, or 0 for unknown. When known,
-  // combining with db_session_id must uniquely identify an SST file.
-  uint64_t orig_file_number = 0;
   // the total size of all data blocks.
   uint64_t data_size = 0;
   // the size of index block.
@@ -200,8 +173,6 @@ struct TableProperties {
   uint64_t num_data_blocks = 0;
   // the number of entries in this table
   uint64_t num_entries = 0;
-  // the number of unique entries (keys or prefixes) added to filters
-  uint64_t num_filter_entries = 0;
   // the number of deletions in the table
   uint64_t num_deletions = 0;
   // the number of merge operands in the table
@@ -224,18 +195,6 @@ struct TableProperties {
   uint64_t oldest_key_time = 0;
   // Actual SST file creation time. 0 means unknown.
   uint64_t file_creation_time = 0;
-  // Estimated size of data blocks if compressed using a relatively slower
-  // compression algorithm (see `ColumnFamilyOptions::sample_for_compression`).
-  // 0 means unknown.
-  uint64_t slow_compression_estimated_data_size = 0;
-  // Estimated size of data blocks if compressed using a relatively faster
-  // compression algorithm (see `ColumnFamilyOptions::sample_for_compression`).
-  // 0 means unknown.
-  uint64_t fast_compression_estimated_data_size = 0;
-  // Offset of the value of the property "external sst file global seqno" in the
-  // file if the property exists.
-  // 0 means not exists.
-  uint64_t external_sst_file_global_seqno_offset = 0;
 
   // DB identity
   // db_id is an identifier generated the first time the DB is created
@@ -288,6 +247,9 @@ struct TableProperties {
   UserCollectedProperties user_collected_properties;
   UserCollectedProperties readable_properties;
 
+  // The offset of the value of each property in the file.
+  std::map<std::string, uint64_t> properties_offsets;
+
   // convert this object to a human readable form
   //   @prop_delim: delimiter for each property.
   std::string ToString(const std::string& prop_delim = "; ",
@@ -296,11 +258,6 @@ struct TableProperties {
   // Aggregate the numerical member variables of the specified
   // TableProperties.
   void Add(const TableProperties& tp);
-
-  // Subset of properties that make sense when added together
-  // between tables. Keys match field names in this class instead
-  // of using full property names.
-  std::map<std::string, uint64_t> GetAggregatablePropertiesAsMap() const;
 };
 
 // Extra properties

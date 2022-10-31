@@ -58,7 +58,7 @@ Status AdaptiveTableFactory::NewTableReader(
     return plain_table_factory_->NewTableReader(
         table_reader_options, std::move(file), file_size, table);
   } else if (footer.table_magic_number() == kBlockBasedTableMagicNumber ||
-             footer.table_magic_number() == kLegacyBlockBasedTableMagicNumber) {
+      footer.table_magic_number() == kLegacyBlockBasedTableMagicNumber) {
     return block_based_table_factory_->NewTableReader(
         ro, table_reader_options, std::move(file), file_size, table,
         prefetch_index_and_filter_in_cache);
@@ -71,9 +71,10 @@ Status AdaptiveTableFactory::NewTableReader(
 }
 
 TableBuilder* AdaptiveTableFactory::NewTableBuilder(
-    const TableBuilderOptions& table_builder_options,
+    const TableBuilderOptions& table_builder_options, uint32_t column_family_id,
     WritableFileWriter* file) const {
-  return table_factory_to_write_->NewTableBuilder(table_builder_options, file);
+  return table_factory_to_write_->NewTableBuilder(table_builder_options,
+                                                  column_family_id, file);
 }
 
 std::string AdaptiveTableFactory::GetPrintableOptions() const {

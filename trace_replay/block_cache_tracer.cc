@@ -12,7 +12,6 @@
 #include "db/db_impl/db_impl.h"
 #include "db/dbformat.h"
 #include "rocksdb/slice.h"
-#include "rocksdb/trace_record.h"
 #include "util/coding.h"
 #include "util/hash.h"
 #include "util/string_util.h"
@@ -100,9 +99,9 @@ uint64_t BlockCacheTraceHelper::GetBlockOffsetInFile(
 }
 
 BlockCacheTraceWriter::BlockCacheTraceWriter(
-    SystemClock* clock, const TraceOptions& trace_options,
+    Env* env, const TraceOptions& trace_options,
     std::unique_ptr<TraceWriter>&& trace_writer)
-    : clock_(clock),
+    : env_(env),
       trace_options_(trace_options),
       trace_writer_(std::move(trace_writer)) {}
 
@@ -143,7 +142,7 @@ Status BlockCacheTraceWriter::WriteBlockAccess(
 
 Status BlockCacheTraceWriter::WriteHeader() {
   Trace trace;
-  trace.ts = clock_->NowMicros();
+  trace.ts = env_->NowMicros();
   trace.type = TraceType::kTraceBegin;
   PutLengthPrefixedSlice(&trace.payload, kTraceMagic);
   PutFixed32(&trace.payload, kMajorVersion);
@@ -445,7 +444,7 @@ BlockCacheTracer::BlockCacheTracer() { writer_.store(nullptr); }
 BlockCacheTracer::~BlockCacheTracer() { EndTrace(); }
 
 Status BlockCacheTracer::StartTrace(
-    SystemClock* clock, const TraceOptions& trace_options,
+    Env* env, const TraceOptions& trace_options,
     std::unique_ptr<TraceWriter>&& trace_writer) {
   InstrumentedMutexLock lock_guard(&trace_writer_mutex_);
   if (writer_.load()) {
@@ -454,7 +453,7 @@ Status BlockCacheTracer::StartTrace(
   get_id_counter_.store(1);
   trace_options_ = trace_options;
   writer_.store(
-      new BlockCacheTraceWriter(clock, trace_options, std::move(trace_writer)));
+      new BlockCacheTraceWriter(env, trace_options, std::move(trace_writer)));
   return writer_.load()->WriteHeader();
 }
 

@@ -9,17 +9,12 @@
 
 #pragma once
 
-#include "rocksdb/customizable.h"
 #include "rocksdb/env.h"
 #include "rocksdb/statistics.h"
-#include "rocksdb/status.h"
 
 namespace ROCKSDB_NAMESPACE {
 
-// Exceptions MUST NOT propagate out of overridden functions into RocksDB,
-// because RocksDB is not exception-safe. This could cause undefined behavior
-// including data loss, unreported corruption, deadlocks, and more.
-class RateLimiter : public Customizable {
+class RateLimiter {
  public:
   enum class OpType {
     // Limitation: we currently only invoke Request() with OpType::kRead for
@@ -33,19 +28,10 @@ class RateLimiter : public Customizable {
     kAllIo,
   };
 
-  static const char* Type() { return "RateLimiter"; }
-  static Status CreateFromString(const ConfigOptions& options,
-                                 const std::string& value,
-                                 std::shared_ptr<RateLimiter>* result);
-
   // For API compatibility, default to rate-limiting writes only.
-  explicit RateLimiter(Mode mode = Mode::kWritesOnly);
+  explicit RateLimiter(Mode mode = Mode::kWritesOnly) : mode_(mode) {}
 
   virtual ~RateLimiter() {}
-
-  // Deprecated. Will be removed in a major release. Derived classes
-  // should implement this method.
-  virtual const char* Name() const override { return ""; }
 
   // This API allows user to dynamically change rate limiter's bytes per second.
   // REQUIRED: bytes_per_second > 0
@@ -59,15 +45,13 @@ class RateLimiter : public Customizable {
   // Request for token for bytes. If this request can not be satisfied, the call
   // is blocked. Caller is responsible to make sure
   // bytes <= GetSingleBurstBytes()
-  // and bytes >= 0.
   virtual void Request(const int64_t /*bytes*/, const Env::IOPriority /*pri*/) {
     assert(false);
   }
 
   // Request for token for bytes and potentially update statistics. If this
   // request can not be satisfied, the call is blocked. Caller is responsible to
-  // make sure bytes <= GetSingleBurstBytes()
-  // and bytes >= 0.
+  // make sure bytes <= GetSingleBurstBytes().
   virtual void Request(const int64_t bytes, const Env::IOPriority pri,
                        Statistics* /* stats */) {
     // For API compatibility, default implementation calls the older API in
@@ -78,8 +62,7 @@ class RateLimiter : public Customizable {
   // Requests token to read or write bytes and potentially updates statistics.
   //
   // If this request can not be satisfied, the call is blocked. Caller is
-  // responsible to make sure bytes <= GetSingleBurstBytes()
-  // and bytes >= 0.
+  // responsible to make sure bytes <= GetSingleBurstBytes().
   virtual void Request(const int64_t bytes, const Env::IOPriority pri,
                        Statistics* stats, OpType op_type) {
     if (IsRateLimited(op_type)) {
@@ -106,20 +89,6 @@ class RateLimiter : public Customizable {
   virtual int64_t GetTotalRequests(
       const Env::IOPriority pri = Env::IO_TOTAL) const = 0;
 
-  // Total # of requests that are pending for bytes in rate limiter
-  // For convenience, this function is supported by the RateLimiter returned
-  // by NewGenericRateLimiter but is not required by RocksDB.
-  //
-  // REQUIRED: total_pending_request != nullptr
-  virtual Status GetTotalPendingRequests(
-      int64_t* total_pending_requests,
-      const Env::IOPriority pri = Env::IO_TOTAL) const {
-    assert(total_pending_requests != nullptr);
-    (void)total_pending_requests;
-    (void)pri;
-    return Status::NotSupported();
-  }
-
   virtual int64_t GetBytesPerSecond() const = 0;
 
   virtual bool IsRateLimited(OpType op_type) {
@@ -136,7 +105,7 @@ class RateLimiter : public Customizable {
   Mode GetMode() { return mode_; }
 
  private:
-  Mode mode_;
+  const Mode mode_;
 };
 
 // Create a RateLimiter object, which can be shared among RocksDB instances to

@@ -64,7 +64,7 @@ TEST_F(AutoVectorTest, PushBackAndPopBack) {
 }
 
 TEST_F(AutoVectorTest, EmplaceBack) {
-  using ValType = std::pair<size_t, std::string>;
+  typedef std::pair<size_t, std::string> ValType;
   autovector<ValType, kSize> vec;
 
   for (size_t i = 0; i < 1000 * kSize; ++i) {

@@ -19,8 +19,6 @@
 #include <sstream>
 
 #include "monitoring/histogram.h"
-#include "rocksdb/system_clock.h"
-#include "rocksdb/trace_record.h"
 #include "util/gflags_compat.h"
 #include "util/string_util.h"
 
@@ -1521,7 +1519,6 @@ Status BlockCacheTraceAnalyzer::RecordAccess(
 }
 
 Status BlockCacheTraceAnalyzer::Analyze() {
-  SystemClock* clock = env_->GetSystemClock().get();
   std::unique_ptr<BlockCacheTraceReader> reader;
   Status s = Status::OK();
   if (is_human_readable_trace_file_) {
@@ -1545,7 +1542,7 @@ Status BlockCacheTraceAnalyzer::Analyze() {
       return s;
     }
   }
-  uint64_t start = clock->NowMicros();
+  uint64_t start = env_->NowMicros();
   uint64_t time_interval = 0;
   while (s.ok()) {
     BlockCacheTraceRecord access;
@@ -1571,7 +1568,7 @@ Status BlockCacheTraceAnalyzer::Analyze() {
       cache_simulator_->Access(access);
     }
     access_sequence_number_++;
-    uint64_t now = clock->NowMicros();
+    uint64_t now = env_->NowMicros();
     uint64_t duration = (now - start) / kMicrosInSecond;
     if (duration > 10 * time_interval) {
       uint64_t trace_duration =
@@ -1585,7 +1582,7 @@ Status BlockCacheTraceAnalyzer::Analyze() {
       time_interval++;
     }
   }
-  uint64_t now = clock->NowMicros();
+  uint64_t now = env_->NowMicros();
   uint64_t duration = (now - start) / kMicrosInSecond;
   uint64_t trace_duration =
       trace_end_timestamp_in_seconds_ - trace_start_timestamp_in_seconds_;

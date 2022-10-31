@@ -172,7 +172,7 @@ public:
    *
    * @return [description]
    */
-  Status InvalidateCache(size_t /*offset*/, size_t /*length*/) {
+  Status InvalidateCache(size_t offset, size_t length) {
     return Status::OK();
   }
 };
@@ -237,7 +237,8 @@ public:
   };
 
   //enum AccessPattern { NORMAL, RANDOM, SEQUENTIAL, WILLNEED, DONTNEED };
-  void Hint(AccessPattern /*pattern*/) { /* Do nothing */
+  void Hint(AccessPattern pattern) {
+    /* Do nothing */
   }
 
   /**
@@ -249,7 +250,7 @@ public:
    *
    * @return [description]
    */
-  Status InvalidateCache(size_t /*offset*/, size_t /*length*/) {
+  Status InvalidateCache(size_t offset, size_t length) {
     return Status::OK();
   }
 };
@@ -314,7 +315,6 @@ class LibradosWritableFile : public WritableFile {
     Sync();
   }
 
-  using WritableFile::Append;
   /**
    * @brief append data to file
    * @details
@@ -324,7 +324,7 @@ class LibradosWritableFile : public WritableFile {
    * @param data [description]
    * @return [description]
    */
-  Status Append(const Slice& data) override {
+  Status Append(const Slice& data) {
     // append buffer
     LOG_DEBUG("[IN] %i | %s\n", (int)data.size(), data.data());
     int r = 0;
@@ -341,14 +341,14 @@ class LibradosWritableFile : public WritableFile {
     return err_to_status(r);
   }
 
-  using WritableFile::PositionedAppend;
   /**
    * @brief not supported
    * @details [long description]
    * @return [description]
    */
-  Status PositionedAppend(const Slice& /* data */,
-                          uint64_t /* offset */) override {
+  Status PositionedAppend(
+    const Slice& /* data */,
+    uint64_t /* offset */) {
     return Status::NotSupported();
   }
 
@@ -359,7 +359,7 @@ class LibradosWritableFile : public WritableFile {
    * @param size [description]
    * @return [description]
    */
-  Status Truncate(uint64_t size) override {
+  Status Truncate(uint64_t size) {
     LOG_DEBUG("[IN]%lld|%lld|%lld\n", (long long)size, (long long)_file_size, (long long)_buffer_size);
     int r = 0;
 
@@ -391,7 +391,7 @@ class LibradosWritableFile : public WritableFile {
    * @details [long description]
    * @return [description]
    */
-  Status Close() override {
+  Status Close() {
     LOG_DEBUG("%s | %lld | %lld\n", _hint.c_str(), (long long)_buffer_size, (long long)_file_size);
     return Sync();
   }
@@ -402,7 +402,7 @@ class LibradosWritableFile : public WritableFile {
    *
    * @return [description]
    */
-  Status Flush() override {
+  Status Flush() {
     librados::AioCompletion *write_completion = librados::Rados::aio_create_completion();
     int r = 0;
 
@@ -425,7 +425,7 @@ class LibradosWritableFile : public WritableFile {
    * @details initiate an aio write and wait for result
    * @return [description]
    */
-  Status Sync() override {  // sync data
+  Status Sync() { // sync data
     int r = 0;
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -441,14 +441,18 @@ class LibradosWritableFile : public WritableFile {
    * @details [long description]
    * @return true if Sync() and Fsync() are safe to call concurrently with Append()and Flush().
    */
-  bool IsSyncThreadSafe() const override { return true; }
+  bool IsSyncThreadSafe() const {
+    return true;
+  }
 
   /**
    * @brief Indicates the upper layers if the current WritableFile implementation uses direct IO.
    * @details [long description]
    * @return [description]
    */
-  bool use_direct_io() const override { return false; }
+  bool use_direct_io() const {
+    return false;
+  }
 
   /**
    * @brief Get file size
@@ -456,7 +460,7 @@ class LibradosWritableFile : public WritableFile {
    *  This API will use cached file_size.
    * @return [description]
    */
-  uint64_t GetFileSize() override {
+  uint64_t GetFileSize() {
     LOG_DEBUG("%lld|%lld\n", (long long)_buffer_size, (long long)_file_size);
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -474,7 +478,7 @@ class LibradosWritableFile : public WritableFile {
    *
    * @return [description]
    */
-  size_t GetUniqueId(char* id, size_t max_size) const override {
+  size_t GetUniqueId(char* id, size_t max_size) const {
     // All fid has the same db_id prefix, so we need to ignore db_id prefix
     size_t s = std::min(max_size, _fid.size());
     strncpy(id, _fid.c_str() + (_fid.size() - s), s);
@@ -491,10 +495,11 @@ class LibradosWritableFile : public WritableFile {
    *
    * @return [description]
    */
-  Status InvalidateCache(size_t /*offset*/, size_t /*length*/) override {
+  Status InvalidateCache(size_t offset, size_t length) {
     return Status::OK();
   }
 
+  using WritableFile::RangeSync;
   /**
    * @brief No RangeSync support, just call Sync()
    * @details [long description]
@@ -504,11 +509,12 @@ class LibradosWritableFile : public WritableFile {
    *
    * @return [description]
    */
-  Status RangeSync(uint64_t /*offset*/, uint64_t /*nbytes*/) override {
+  Status RangeSync(off_t offset, off_t nbytes) {
     return Sync();
   }
 
- protected:
+protected:
+  using WritableFile::Allocate;
   /**
    * @brief noop
    * @details [long description]
@@ -518,7 +524,7 @@ class LibradosWritableFile : public WritableFile {
    *
    * @return [description]
    */
-  Status Allocate(uint64_t /*offset*/, uint64_t /*len*/) override {
+  Status Allocate(off_t offset, off_t len) {
     return Status::OK();
   }
 };
@@ -527,14 +533,16 @@ class LibradosWritableFile : public WritableFile {
 // Directory object represents collection of files and implements
 // filesystem operations that can be executed on directories.
 class LibradosDirectory : public Directory {
+  librados::IoCtx * _io_ctx;
   std::string _fid;
-
- public:
-  explicit LibradosDirectory(librados::IoCtx* /*io_ctx*/, std::string fid)
-      : _fid(fid) {}
+public:
+  explicit LibradosDirectory(librados::IoCtx * io_ctx, std::string fid):
+    _io_ctx(io_ctx), _fid(fid) {}
 
   // Fsync directory. Can be called concurrently from multiple threads.
-  Status Fsync() { return Status::OK(); }
+  Status Fsync() {
+    return Status::OK();
+  }
 };
 
 // Identifies a locked file.
@@ -544,8 +552,8 @@ class LibradosFileLock : public FileLock {
   const std::string _obj_name;
   const std::string _lock_name;
   const std::string _cookie;
-
- public:
+  int lock_state;
+public:
   LibradosFileLock(
     librados::IoCtx * io_ctx,
     const std::string obj_name):
@@ -854,6 +862,25 @@ librados::IoCtx* EnvLibrados::_GetIoctx(const std::string& fpath) {
                 public functions
 ************************************************************/
 /**
+ * @brief generate unique id
+ * @details Combine system time and random number.
+ * @return [description]
+ */
+std::string EnvLibrados::GenerateUniqueId() {
+  Random64 r(time(nullptr));
+  uint64_t random_uuid_portion =
+    r.Uniform(std::numeric_limits<uint64_t>::max());
+  uint64_t nanos_uuid_portion = NowNanos();
+  char uuid2[200];
+  snprintf(uuid2,
+           200,
+           "%16lx-%16lx",
+           (unsigned long)nanos_uuid_portion,
+           (unsigned long)random_uuid_portion);
+  return uuid2;
+}
+
+/**
  * @brief create a new sequential read file handler
  * @details it will check the existence of fname
  *
@@ -862,9 +889,11 @@ librados::IoCtx* EnvLibrados::_GetIoctx(const std::string& fpath) {
  * @param options [description]
  * @return [description]
  */
-Status EnvLibrados::NewSequentialFile(const std::string& fname,
-                                      std::unique_ptr<SequentialFile>* result,
-                                      const EnvOptions& /*options*/) {
+Status EnvLibrados::NewSequentialFile(
+  const std::string& fname,
+  std::unique_ptr<SequentialFile>* result,
+  const EnvOptions& options)
+{
   LOG_DEBUG("[IN]%s\n", fname.c_str());
   std::string dir, file, fid;
   split(fname, &dir, &file);
@@ -904,8 +933,10 @@ Status EnvLibrados::NewSequentialFile(const std::string& fname,
  * @return [description]
  */
 Status EnvLibrados::NewRandomAccessFile(
-    const std::string& fname, std::unique_ptr<RandomAccessFile>* result,
-    const EnvOptions& /*options*/) {
+  const std::string& fname,
+  std::unique_ptr<RandomAccessFile>* result,
+  const EnvOptions& options)
+{
   LOG_DEBUG("[IN]%s\n", fname.c_str());
   std::string dir, file, fid;
   split(fname, &dir, &file);
@@ -1362,8 +1393,6 @@ Status EnvLibrados::LinkFile(
   const std::string& src,
   const std::string& target_in)
 {
-  (void)src;
-  (void)target_in;
   LOG_DEBUG("[IO]%s => %s\n", src.c_str(), target_in.c_str());
   return Status::NotSupported();
 }
@@ -1445,9 +1474,10 @@ Status EnvLibrados::UnlockFile(FileLock* lock)
  *
  * @return [description]
  */
-Status EnvLibrados::GetAbsolutePath(const std::string& db_path,
-                                    std::string* /*output_path*/) {
-  (void)db_path;
+Status EnvLibrados::GetAbsolutePath(
+  const std::string& db_path,
+  std::string* output_path)
+{
   LOG_DEBUG("[IO]%s\n", db_path.c_str());
   return Status::NotSupported();
 }

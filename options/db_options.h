@@ -11,7 +11,6 @@
 #include "rocksdb/options.h"
 
 namespace ROCKSDB_NAMESPACE {
-class SystemClock;
 
 struct ImmutableDBOptions {
   static const char* kName() { return "ImmutableDBOptions"; }
@@ -24,9 +23,9 @@ struct ImmutableDBOptions {
   bool create_missing_column_families;
   bool error_if_exists;
   bool paranoid_checks;
-  bool flush_verify_memtable_count;
   bool track_and_verify_wals_in_manifest;
   Env* env;
+  std::shared_ptr<FileSystem> fs;
   std::shared_ptr<RateLimiter> rate_limiter;
   std::shared_ptr<SstFileManager> sst_file_manager;
   std::shared_ptr<Logger> info_log;
@@ -36,9 +35,6 @@ struct ImmutableDBOptions {
   bool use_fsync;
   std::vector<DbPath> db_paths;
   std::string db_log_dir;
-  // The wal_dir option from the file.  To determine the
-  // directory in use, the GetWalDir or IsWalDirSameAsDBPath
-  // methods should be used instead of accessing this variable directly.
   std::string wal_dir;
   size_t max_log_file_size;
   size_t log_file_time_to_roll;
@@ -46,8 +42,8 @@ struct ImmutableDBOptions {
   size_t recycle_log_file_num;
   uint64_t max_manifest_file_size;
   int table_cache_numshardbits;
-  uint64_t WAL_ttl_seconds;
-  uint64_t WAL_size_limit_MB;
+  uint64_t wal_ttl_seconds;
+  uint64_t wal_size_limit_mb;
   uint64_t max_write_batch_group_size_bytes;
   size_t manifest_preallocation_size;
   bool allow_mmap_reads;
@@ -57,7 +53,6 @@ struct ImmutableDBOptions {
   bool allow_fallocate;
   bool is_fd_close_on_exec;
   bool advise_random_on_open;
-  double experimental_mempurge_threshold;
   size_t db_write_buffer_size;
   std::shared_ptr<WriteBufferManager> write_buffer_manager;
   DBOptions::AccessHint access_hint_on_compaction_start;
@@ -98,24 +93,12 @@ struct ImmutableDBOptions {
   uint64_t bgerror_resume_retry_interval;
   bool allow_data_in_errors;
   std::string db_host_id;
-  FileTypeSet checksum_handoff_file_types;
-  CacheTier lowest_used_cache_tier;
-  // Convenience/Helper objects that are not part of the base DBOptions
-  std::shared_ptr<FileSystem> fs;
-  SystemClock* clock;
-  Statistics* stats;
-  Logger* logger;
-  std::shared_ptr<CompactionService> compaction_service;
-
-  bool IsWalDirSameAsDBPath() const;
-  bool IsWalDirSameAsDBPath(const std::string& path) const;
-  const std::string& GetWalDir() const;
-  const std::string& GetWalDir(const std::string& path) const;
 };
 
 struct MutableDBOptions {
   static const char* kName() { return "MutableDBOptions"; }
   MutableDBOptions();
+  explicit MutableDBOptions(const MutableDBOptions& options) = default;
   explicit MutableDBOptions(const DBOptions& options);
 
   void Dump(Logger* log) const;
@@ -139,19 +122,5 @@ struct MutableDBOptions {
   size_t compaction_readahead_size;
   int max_background_flushes;
 };
-
-#ifndef ROCKSDB_LITE
-Status GetStringFromMutableDBOptions(const ConfigOptions& config_options,
-                                     const MutableDBOptions& mutable_opts,
-                                     std::string* opt_string);
-
-Status GetMutableDBOptionsFromStrings(
-    const MutableDBOptions& base_options,
-    const std::unordered_map<std::string, std::string>& options_map,
-    MutableDBOptions* new_options);
-
-bool MutableDBOptionsAreEqual(const MutableDBOptions& this_options,
-                              const MutableDBOptions& that_options);
-#endif  // ROCKSDB_LITE
 
 }  // namespace ROCKSDB_NAMESPACE

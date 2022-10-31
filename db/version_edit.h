@@ -19,7 +19,6 @@
 #include "db/dbformat.h"
 #include "db/wal_edit.h"
 #include "memory/arena.h"
-#include "rocksdb/advanced_options.h"
 #include "rocksdb/cache.h"
 #include "table/table_reader.h"
 #include "util/autovector.h"
@@ -53,21 +52,15 @@ enum Tag : uint32_t {
 
   kInAtomicGroup = 300,
 
-  kBlobFileAddition = 400,
-  kBlobFileGarbage,
-
   // Mask for an unidentified tag from the future which can be safely ignored.
   kTagSafeIgnoreMask = 1 << 13,
 
   // Forward compatible (aka ignorable) records
   kDbId,
-  kBlobFileAddition_DEPRECATED,
-  kBlobFileGarbage_DEPRECATED,
+  kBlobFileAddition,
+  kBlobFileGarbage,
   kWalAddition,
   kWalDeletion,
-  kFullHistoryTsLow,
-  kWalAddition2,
-  kWalDeletion2,
 };
 
 enum NewFileCustomTag : uint32_t {
@@ -75,16 +68,13 @@ enum NewFileCustomTag : uint32_t {
   kNeedCompaction = 2,
   // Since Manifest is not entirely forward-compatible, we currently encode
   // kMinLogNumberToKeep as part of NewFile as a hack. This should be removed
-  // when manifest becomes forward-compatible.
+  // when manifest becomes forward-comptabile.
   kMinLogNumberToKeepHack = 3,
   kOldestBlobFileNumber = 4,
   kOldestAncesterTime = 5,
   kFileCreationTime = 6,
   kFileChecksum = 7,
   kFileChecksumFuncName = 8,
-  kTemperature = 9,
-  kMinTimestamp = 10,
-  kMaxTimestamp = 11,
 
   // If this bit for the custom tag is set, opening DB should fail if
   // we don't know this field.
@@ -192,7 +182,6 @@ struct FileMetaData {
 
   bool marked_for_compaction = false;  // True if client asked us nicely to
                                        // compact this file.
-  Temperature temperature = Temperature::kUnknown;
 
   // Used only in BlobDB. The file number of the oldest blob file this SST file
   // refers to. 0 is an invalid value; BlobDB numbers the files starting from 1.
@@ -200,7 +189,7 @@ struct FileMetaData {
 
   // The file could be the compaction output from other SST files, which could
   // in turn be outputs for compact older SST files. We track the memtable
-  // flush timestamp for the oldest SST file that eventually contribute data
+  // flush timestamp for the oldest SST file that eventaully contribute data
   // to this file. 0 means the information is not available.
   uint64_t oldest_ancester_time = kUnknownOldestAncesterTime;
 
@@ -212,10 +201,6 @@ struct FileMetaData {
 
   // File checksum function name
   std::string file_checksum_func_name = kUnknownFileChecksumFuncName;
-  // Min (oldest) timestamp of keys in this file
-  std::string min_timestamp;
-  // Max (newest) timestamp of keys in this file
-  std::string max_timestamp;
 
   FileMetaData() = default;
 
@@ -223,23 +208,18 @@ struct FileMetaData {
                const InternalKey& smallest_key, const InternalKey& largest_key,
                const SequenceNumber& smallest_seq,
                const SequenceNumber& largest_seq, bool marked_for_compact,
-               Temperature _temperature, uint64_t oldest_blob_file,
-               uint64_t _oldest_ancester_time, uint64_t _file_creation_time,
-               const std::string& _file_checksum,
-               const std::string& _file_checksum_func_name,
-               std::string _min_timestamp, std::string _max_timestamp)
+               uint64_t oldest_blob_file, uint64_t _oldest_ancester_time,
+               uint64_t _file_creation_time, const std::string& _file_checksum,
+               const std::string& _file_checksum_func_name)
       : fd(file, file_path_id, file_size, smallest_seq, largest_seq),
         smallest(smallest_key),
         largest(largest_key),
         marked_for_compaction(marked_for_compact),
-        temperature(_temperature),
         oldest_blob_file_number(oldest_blob_file),
         oldest_ancester_time(_oldest_ancester_time),
         file_creation_time(_file_creation_time),
         file_checksum(_file_checksum),
-        file_checksum_func_name(_file_checksum_func_name),
-        min_timestamp(std::move(_min_timestamp)),
-        max_timestamp(std::move(_max_timestamp)) {
+        file_checksum_func_name(_file_checksum_func_name) {
     TEST_SYNC_POINT_CALLBACK("FileMetaData::FileMetaData", this);
   }
 
@@ -404,31 +384,21 @@ class VersionEdit {
                uint64_t file_size, const InternalKey& smallest,
                const InternalKey& largest, const SequenceNumber& smallest_seqno,
                const SequenceNumber& largest_seqno, bool marked_for_compaction,
-               Temperature temperature, uint64_t oldest_blob_file_number,
-               uint64_t oldest_ancester_time, uint64_t file_creation_time,
-               const std::string& file_checksum,
-               const std::string& file_checksum_func_name,
-               const std::string& min_timestamp,
-               const std::string& max_timestamp) {
+               uint64_t oldest_blob_file_number, uint64_t oldest_ancester_time,
+               uint64_t file_creation_time, const std::string& file_checksum,
+               const std::string& file_checksum_func_name) {
     assert(smallest_seqno <= largest_seqno);
     new_files_.emplace_back(
-        level,
-        FileMetaData(file, file_path_id, file_size, smallest, largest,
-                     smallest_seqno, largest_seqno, marked_for_compaction,
-                     temperature, oldest_blob_file_number, oldest_ancester_time,
-                     file_creation_time, file_checksum, file_checksum_func_name,
-                     min_timestamp, max_timestamp));
-    if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
-      SetLastSequence(largest_seqno);
-    }
+        level, FileMetaData(file, file_path_id, file_size, smallest, largest,
+                            smallest_seqno, largest_seqno,
+                            marked_for_compaction, oldest_blob_file_number,
+                            oldest_ancester_time, file_creation_time,
+                            file_checksum, file_checksum_func_name));
   }
 
   void AddFile(int level, const FileMetaData& f) {
     assert(f.fd.smallest_seqno <= f.fd.largest_seqno);
     new_files_.emplace_back(level, f);
-    if (!HasLastSequence() || f.fd.largest_seqno > GetLastSequence()) {
-      SetLastSequence(f.fd.largest_seqno);
-    }
   }
 
   // Retrieve the table files added as well as their associated levels.
@@ -455,7 +425,6 @@ class VersionEdit {
   }
 
   void SetBlobFileAdditions(BlobFileAdditions blob_file_additions) {
-    assert(blob_file_additions_.empty());
     blob_file_additions_ = std::move(blob_file_additions);
   }
 
@@ -479,7 +448,6 @@ class VersionEdit {
   }
 
   void SetBlobFileGarbages(BlobFileGarbages blob_file_garbages) {
-    assert(blob_file_garbages_.empty());
     blob_file_garbages_ = std::move(blob_file_garbages);
   }
 
@@ -556,16 +524,6 @@ class VersionEdit {
   bool IsInAtomicGroup() const { return is_in_atomic_group_; }
   uint32_t GetRemainingEntries() const { return remaining_entries_; }
 
-  bool HasFullHistoryTsLow() const { return !full_history_ts_low_.empty(); }
-  const std::string& GetFullHistoryTsLow() const {
-    assert(HasFullHistoryTsLow());
-    return full_history_ts_low_;
-  }
-  void SetFullHistoryTsLow(std::string full_history_ts_low) {
-    assert(!full_history_ts_low.empty());
-    full_history_ts_low_ = std::move(full_history_ts_low);
-  }
-
   // return true on success.
   bool EncodeTo(std::string* dst) const;
   Status DecodeFrom(const Slice& src);
@@ -628,8 +586,6 @@ class VersionEdit {
 
   bool is_in_atomic_group_ = false;
   uint32_t remaining_entries_ = 0;
-
-  std::string full_history_ts_low_;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

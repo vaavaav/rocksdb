@@ -68,8 +68,7 @@ class MemoryTest : public testing::Test {
         ASSERT_OK(db_impl->TEST_GetAllImmutableCFOptions(&iopts_map));
       }
       for (auto pair : iopts_map) {
-        GetCachePointersFromTableFactory(pair.second->table_factory.get(),
-                                         cache_set);
+        GetCachePointersFromTableFactory(pair.second->table_factory, cache_set);
       }
     }
   }
@@ -104,7 +103,7 @@ TEST_F(MemoryTest, SharedBlockCacheTotal) {
   BlockBasedTableOptions bbt_opts;
   bbt_opts.block_cache = NewLRUCache(4096 * 1000 * 10);
   for (int i = 0; i < kNumDBs; ++i) {
-    ASSERT_OK(DestroyDB(GetDBName(i), opt));
+    DestroyDB(GetDBName(i), opt);
     DB* db = nullptr;
     ASSERT_OK(DB::Open(opt, GetDBName(i), &db));
     dbs.push_back(db);
@@ -120,13 +119,13 @@ TEST_F(MemoryTest, SharedBlockCacheTotal) {
         ASSERT_OK(dbs[i]->Put(WriteOptions(), keys_by_db[i].back(),
                               rnd_.RandomString(kValueSize)));
       }
-      ASSERT_OK(dbs[i]->Flush(FlushOptions()));
+      dbs[i]->Flush(FlushOptions());
     }
   }
   for (int i = 0; i < kNumDBs; ++i) {
     for (auto& key : keys_by_db[i]) {
       std::string value;
-      ASSERT_OK(dbs[i]->Get(ReadOptions(), key, &value));
+      dbs[i]->Get(ReadOptions(), key, &value);
     }
     UpdateUsagesHistory(dbs);
   }
@@ -146,10 +145,8 @@ TEST_F(MemoryTest, MemTableAndTableReadersTotal) {
   std::vector<uint64_t> usage_by_type;
   std::vector<std::vector<ColumnFamilyHandle*>> vec_handles;
   const int kNumDBs = 10;
-  // These key/value sizes ensure each KV has its own memtable. Note that the
-  // minimum write_buffer_size allowed is 64 KB.
   const int kKeySize = 100;
-  const int kValueSize = 1 << 16;
+  const int kValueSize = 500;
   Options opt;
   opt.create_if_missing = true;
   opt.create_missing_column_families = true;
@@ -165,7 +162,7 @@ TEST_F(MemoryTest, MemTableAndTableReadersTotal) {
   };
 
   for (int i = 0; i < kNumDBs; ++i) {
-    ASSERT_OK(DestroyDB(GetDBName(i), opt));
+    DestroyDB(GetDBName(i), opt);
     std::vector<ColumnFamilyHandle*> handles;
     dbs.emplace_back();
     vec_handles.emplace_back();
@@ -201,12 +198,11 @@ TEST_F(MemoryTest, MemTableAndTableReadersTotal) {
   // Create an iterator and flush all memtables for each db
   for (int i = 0; i < kNumDBs; ++i) {
     iters.push_back(dbs[i]->NewIterator(ReadOptions()));
-    ASSERT_OK(dbs[i]->Flush(FlushOptions()));
+    dbs[i]->Flush(FlushOptions());
 
     for (int j = 0; j < 100; ++j) {
       std::string value;
-      ASSERT_NOK(
-          dbs[i]->Get(ReadOptions(), rnd_.RandomString(kKeySize), &value));
+      dbs[i]->Get(ReadOptions(), rnd_.RandomString(kKeySize), &value);
     }
 
     UpdateUsagesHistory(dbs);

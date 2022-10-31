@@ -19,8 +19,6 @@ int main() {
 #include "memory/arena.h"
 #include "port/port.h"
 #include "port/stack_trace.h"
-#include "rocksdb/cache.h"
-#include "rocksdb/system_clock.h"
 #include "table/block_based/filter_policy_internal.h"
 #include "table/block_based/full_filter_block.h"
 #include "table/block_based/mock_block_based_table.h"
@@ -94,18 +92,6 @@ DEFINE_bool(net_includes_hashing, false,
 DEFINE_bool(optimize_filters_for_memory, false,
             "Setting for BlockBasedTableOptions::optimize_filters_for_memory");
 
-DEFINE_uint32(block_cache_capacity_MB, 8,
-              "Setting for "
-              "LRUCacheOptions::capacity");
-
-DEFINE_bool(reserve_table_builder_memory, false,
-            "Setting for "
-            "BlockBasedTableOptions::reserve_table_builder_memory");
-
-DEFINE_bool(strict_capacity_limit, false,
-            "Setting for "
-            "LRUCacheOptions::strict_capacity_limit");
-
 DEFINE_bool(quick, false, "Run more limited set of tests, fewer queries");
 
 DEFINE_bool(best_case, false, "Run limited tests only for best-case");
@@ -138,7 +124,6 @@ using ROCKSDB_NAMESPACE::BloomFilterPolicy;
 using ROCKSDB_NAMESPACE::BloomHash;
 using ROCKSDB_NAMESPACE::BuiltinFilterBitsBuilder;
 using ROCKSDB_NAMESPACE::CachableEntry;
-using ROCKSDB_NAMESPACE::Cache;
 using ROCKSDB_NAMESPACE::EncodeFixed32;
 using ROCKSDB_NAMESPACE::FastRange32;
 using ROCKSDB_NAMESPACE::FilterBitsReader;
@@ -147,7 +132,6 @@ using ROCKSDB_NAMESPACE::FullFilterBlockReader;
 using ROCKSDB_NAMESPACE::GetSliceHash;
 using ROCKSDB_NAMESPACE::GetSliceHash64;
 using ROCKSDB_NAMESPACE::Lower32of64;
-using ROCKSDB_NAMESPACE::LRUCacheOptions;
 using ROCKSDB_NAMESPACE::ParsedFullFilterBlock;
 using ROCKSDB_NAMESPACE::PlainTableBloomV1;
 using ROCKSDB_NAMESPACE::Random32;
@@ -285,8 +269,8 @@ struct FilterBench : public MockBlockBasedTableTester {
   Random32 random_;
   std::ostringstream fp_rate_report_;
   Arena arena_;
-  double m_queries_;
   StderrLogger stderr_logger_;
+  double m_queries_;
 
   FilterBench()
       : MockBlockBasedTableTester(new BloomFilterPolicy(
@@ -297,19 +281,9 @@ struct FilterBench : public MockBlockBasedTableTester {
     for (uint32_t i = 0; i < FLAGS_batch_size; ++i) {
       kms_.emplace_back(FLAGS_key_size < 8 ? 8 : FLAGS_key_size);
     }
-    ioptions_.logger = &stderr_logger_;
+    ioptions_.info_log = &stderr_logger_;
     table_options_.optimize_filters_for_memory =
         FLAGS_optimize_filters_for_memory;
-    if (FLAGS_reserve_table_builder_memory) {
-      table_options_.reserve_table_builder_memory = true;
-      table_options_.no_block_cache = false;
-      LRUCacheOptions lo;
-      lo.capacity = FLAGS_block_cache_capacity_MB * 1024 * 1024;
-      lo.num_shard_bits = 0;  // 2^0 shard
-      lo.strict_capacity_limit = FLAGS_strict_capacity_limit;
-      std::shared_ptr<Cache> cache(NewLRUCache(lo));
-      table_options_.block_cache = cache;
-    }
   }
 
   void Go();
@@ -384,8 +358,8 @@ void FilterBench::Go() {
     max_mem = static_cast<size_t>(1024 * 1024 * working_mem_size_mb);
   }
 
-  ROCKSDB_NAMESPACE::StopWatchNano timer(
-      ROCKSDB_NAMESPACE::SystemClock::Default().get(), true);
+  ROCKSDB_NAMESPACE::StopWatchNano timer(ROCKSDB_NAMESPACE::Env::Default(),
+                                         true);
 
   infos_.clear();
   while ((working_mem_size_mb == 0 || total_size < max_mem) &&
@@ -588,25 +562,15 @@ double FilterBench::RandomQueryTest(uint32_t inside_threshold, bool dry_run,
     // 100% of queries to 1 filter
     num_primary_filters = 1;
   } else if (mode == kFiftyOneFilter) {
-    if (num_infos < 50) {
-      return 0.0;  // skip
-    }
     // 50% of queries
     primary_filter_threshold /= 2;
     // to 1% of filters
     num_primary_filters = (num_primary_filters + 99) / 100;
   } else if (mode == kEightyTwentyFilter) {
-    if (num_infos < 5) {
-      return 0.0;  // skip
-    }
     // 80% of queries
     primary_filter_threshold = primary_filter_threshold / 5 * 4;
     // to 20% of filters
     num_primary_filters = (num_primary_filters + 4) / 5;
-  } else if (mode == kRandomFilter) {
-    if (num_infos == 1) {
-      return 0.0;  // skip
-    }
   }
   uint32_t batch_size = 1;
   std::unique_ptr<Slice[]> batch_slices;
@@ -624,8 +588,8 @@ double FilterBench::RandomQueryTest(uint32_t inside_threshold, bool dry_run,
     batch_slice_ptrs[i] = &batch_slices[i];
   }
 
-  ROCKSDB_NAMESPACE::StopWatchNano timer(
-      ROCKSDB_NAMESPACE::SystemClock::Default().get(), true);
+  ROCKSDB_NAMESPACE::StopWatchNano timer(ROCKSDB_NAMESPACE::Env::Default(),
+                                         true);
 
   for (uint64_t q = 0; q < max_queries; q += batch_size) {
     bool inside_this_time = random_.Next() <= inside_threshold;

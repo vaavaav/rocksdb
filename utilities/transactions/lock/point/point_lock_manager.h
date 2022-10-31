@@ -27,78 +27,20 @@ struct LockInfo;
 struct LockMap;
 struct LockMapStripe;
 
-template <class Path>
-class DeadlockInfoBufferTempl {
+struct DeadlockInfoBuffer {
  private:
-  std::vector<Path> paths_buffer_;
+  std::vector<DeadlockPath> paths_buffer_;
   uint32_t buffer_idx_;
   std::mutex paths_buffer_mutex_;
-
-  std::vector<Path> Normalize() {
-    auto working = paths_buffer_;
-
-    if (working.empty()) {
-      return working;
-    }
-
-    // Next write occurs at a nonexistent path's slot
-    if (paths_buffer_[buffer_idx_].empty()) {
-      working.resize(buffer_idx_);
-    } else {
-      std::rotate(working.begin(), working.begin() + buffer_idx_,
-                  working.end());
-    }
-
-    return working;
-  }
+  std::vector<DeadlockPath> Normalize();
 
  public:
-  explicit DeadlockInfoBufferTempl(uint32_t n_latest_dlocks)
+  explicit DeadlockInfoBuffer(uint32_t n_latest_dlocks)
       : paths_buffer_(n_latest_dlocks), buffer_idx_(0) {}
-
-  void AddNewPath(Path path) {
-    std::lock_guard<std::mutex> lock(paths_buffer_mutex_);
-
-    if (paths_buffer_.empty()) {
-      return;
-    }
-
-    paths_buffer_[buffer_idx_] = std::move(path);
-    buffer_idx_ = (buffer_idx_ + 1) % paths_buffer_.size();
-  }
-
-  void Resize(uint32_t target_size) {
-    std::lock_guard<std::mutex> lock(paths_buffer_mutex_);
-
-    paths_buffer_ = Normalize();
-
-    // Drop the deadlocks that will no longer be needed ater the normalize
-    if (target_size < paths_buffer_.size()) {
-      paths_buffer_.erase(
-          paths_buffer_.begin(),
-          paths_buffer_.begin() + (paths_buffer_.size() - target_size));
-      buffer_idx_ = 0;
-    }
-    // Resize the buffer to the target size and restore the buffer's idx
-    else {
-      auto prev_size = paths_buffer_.size();
-      paths_buffer_.resize(target_size);
-      buffer_idx_ = (uint32_t)prev_size;
-    }
-  }
-
-  std::vector<Path> PrepareBuffer() {
-    std::lock_guard<std::mutex> lock(paths_buffer_mutex_);
-
-    // Reversing the normalized vector returns the latest deadlocks first
-    auto working = Normalize();
-    std::reverse(working.begin(), working.end());
-
-    return working;
-  }
+  void AddNewPath(DeadlockPath path);
+  void Resize(uint32_t target_size);
+  std::vector<DeadlockPath> PrepareBuffer();
 };
-
-using DeadlockInfoBuffer = DeadlockInfoBufferTempl<DeadlockPath>;
 
 struct TrackedTrxInfo {
   autovector<TransactionID> m_neighbors;
@@ -115,7 +57,7 @@ class PointLockManager : public LockManager {
   PointLockManager(const PointLockManager&) = delete;
   PointLockManager& operator=(const PointLockManager&) = delete;
 
-  ~PointLockManager() override {}
+  ~PointLockManager() override;
 
   bool IsPointLockSupported() const override { return true; }
 
@@ -125,11 +67,7 @@ class PointLockManager : public LockManager {
     return PointLockTrackerFactory::Get();
   }
 
-  // Creates a new LockMap for this column family.  Caller should guarantee
-  // that this column family does not already exist.
   void AddColumnFamily(const ColumnFamilyHandle* cf) override;
-  // Deletes the LockMap for this column family.  Caller should guarantee that
-  // this column family is no longer in use.
   void RemoveColumnFamily(const ColumnFamilyHandle* cf) override;
 
   Status TryLock(PessimisticTransaction* txn, ColumnFamilyId column_family_id,

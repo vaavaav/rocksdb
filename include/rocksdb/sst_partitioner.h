@@ -9,7 +9,6 @@
 #include <memory>
 #include <string>
 
-#include "rocksdb/customizable.h"
 #include "rocksdb/rocksdb_namespace.h"
 #include "rocksdb/slice.h"
 
@@ -52,12 +51,12 @@ class SstPartitioner {
   // It is called for all keys in compaction. When partitioner want to create
   // new SST file it needs to return true. It means compaction job will finish
   // current SST file where last key is "prev_user_key" parameter and start new
-  // SST file where first key is "current_user_key". Returns decision if
+  // SST file where first key is "current_user_key". Returns decission if
   // partition boundary was detected and compaction should create new file.
   virtual PartitionerResult ShouldPartition(
       const PartitionerRequest& request) = 0;
 
-  // Called with smallest and largest keys in SST file when compaction try to do
+  // Called with smallest and largest keys in SST file when compation try to do
   // trivial move. Returns true is partitioner allows to do trivial move.
   virtual bool CanDoTrivialMove(const Slice& smallest_user_key,
                                 const Slice& largest_user_key) = 0;
@@ -78,22 +77,15 @@ class SstPartitioner {
   };
 };
 
-// Exceptions MUST NOT propagate out of overridden functions into RocksDB,
-// because RocksDB is not exception-safe. This could cause undefined behavior
-// including data loss, unreported corruption, deadlocks, and more.
-class SstPartitionerFactory : public Customizable {
+class SstPartitionerFactory {
  public:
-  ~SstPartitionerFactory() override {}
-  static const char* Type() { return "SstPartitionerFactory"; }
-  static Status CreateFromString(
-      const ConfigOptions& options, const std::string& value,
-      std::shared_ptr<SstPartitionerFactory>* result);
+  virtual ~SstPartitionerFactory() {}
 
   virtual std::unique_ptr<SstPartitioner> CreatePartitioner(
       const SstPartitioner::Context& context) const = 0;
 
   // Returns a name that identifies this partitioner factory.
-  const char* Name() const override = 0;
+  virtual const char* Name() const = 0;
 };
 
 /*
@@ -122,12 +114,13 @@ class SstPartitionerFixedPrefix : public SstPartitioner {
  */
 class SstPartitionerFixedPrefixFactory : public SstPartitionerFactory {
  public:
-  explicit SstPartitionerFixedPrefixFactory(size_t len);
+  explicit SstPartitionerFixedPrefixFactory(size_t len) : len_(len) {}
 
-  ~SstPartitionerFixedPrefixFactory() override {}
+  virtual ~SstPartitionerFixedPrefixFactory() {}
 
-  static const char* kClassName() { return "SstPartitionerFixedPrefixFactory"; }
-  const char* Name() const override { return kClassName(); }
+  const char* Name() const override {
+    return "SstPartitionerFixedPrefixFactory";
+  }
 
   std::unique_ptr<SstPartitioner> CreatePartitioner(
       const SstPartitioner::Context& /* context */) const override;

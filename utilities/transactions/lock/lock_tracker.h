@@ -4,14 +4,12 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 #pragma once
-#ifndef ROCKSDB_LITE
 
 #include <memory>
 
 #include "rocksdb/rocksdb_namespace.h"
 #include "rocksdb/status.h"
 #include "rocksdb/types.h"
-#include "rocksdb/utilities/transaction_db.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -31,12 +29,7 @@ struct PointLockRequest {
 
 // Request for locking a range of keys.
 struct RangeLockRequest {
-  // The id of the key's column family.
-  ColumnFamilyId column_family_id;
-
-  // The range to be locked
-  Endpoint start_endp;
-  Endpoint end_endp;
+  // TODO
 };
 
 struct PointLockStatus {
@@ -206,4 +199,3 @@ class LockTrackerFactory {
 };
 
 }  // namespace ROCKSDB_NAMESPACE
-#endif  // ROCKSDB_LITE

@@ -65,7 +65,7 @@ TEST_F(OptionsFileTest, NumberOfOptionsFiles) {
   const int kReopenCount = 20;
   Options opt;
   opt.create_if_missing = true;
-  ASSERT_OK(DestroyDB(dbname_, opt));
+  DestroyDB(dbname_, opt);
   std::unordered_set<std::string> filename_history;
   DB* db;
   for (int i = 0; i < kReopenCount; ++i) {

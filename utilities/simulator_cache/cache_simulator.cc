@@ -4,11 +4,8 @@
 //  (found in the LICENSE.Apache file in the root directory).
 
 #include "utilities/simulator_cache/cache_simulator.h"
-
 #include <algorithm>
-
 #include "db/dbformat.h"
-#include "rocksdb/trace_record.h"
 
 namespace ROCKSDB_NAMESPACE {
 

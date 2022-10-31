@@ -34,7 +34,7 @@ TransactionLogIteratorImpl::TransactionLogIteratorImpl(
       io_tracer_(io_tracer) {
   assert(files_ != nullptr);
   assert(versions_ != nullptr);
-  current_status_.PermitUncheckedError();  // Clear on start
+
   reporter_.env = options_->env;
   reporter_.info_log = options_->info_log.get();
   SeekToStartSequence(); // Seek till starting sequence
@@ -63,8 +63,8 @@ Status TransactionLogIteratorImpl::OpenLogFile(
     }
   }
   if (s.ok()) {
-    file_reader->reset(new SequentialFileReader(
-        std::move(file), fname, io_tracer_, options_->listeners));
+    file_reader->reset(
+        new SequentialFileReader(std::move(file), fname, io_tracer_));
   }
   return s;
 }
@@ -225,8 +225,7 @@ bool TransactionLogIteratorImpl::IsBatchExpected(
 
 void TransactionLogIteratorImpl::UpdateCurrentWriteBatch(const Slice& record) {
   std::unique_ptr<WriteBatch> batch(new WriteBatch());
-  Status s = WriteBatchInternal::SetContents(batch.get(), record);
-  s.PermitUncheckedError();  // TODO: What should we do with this error?
+  WriteBatchInternal::SetContents(batch.get(), record);
 
   SequenceNumber expected_seq = current_last_seq_ + 1;
   // If the iterator has started, then confirm that we get continuous batches
@@ -264,10 +263,6 @@ void TransactionLogIteratorImpl::UpdateCurrentWriteBatch(const Slice& record) {
     }
     Status MarkCommit(const Slice&) override {
       sequence_++;
-      return Status::OK();
-    }
-    Status MarkCommitWithTimestamp(const Slice&, const Slice&) override {
-      ++sequence_;
       return Status::OK();
     }
 

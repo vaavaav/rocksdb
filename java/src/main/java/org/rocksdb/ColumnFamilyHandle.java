@@ -115,9 +115,7 @@ public class ColumnFamilyHandle extends RocksObject {
   @Override
   public int hashCode() {
     try {
-      int result = Objects.hash(getID(), rocksDB_.nativeHandle_);
-      result = 31 * result + Arrays.hashCode(getName());
-      return result;
+      return Objects.hash(getName(), getID(), rocksDB_.nativeHandle_);
     } catch (RocksDBException e) {
       throw new RuntimeException("Cannot calculate hash code of column family handle", e);
     }

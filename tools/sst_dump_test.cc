@@ -10,12 +10,11 @@
 #ifndef ROCKSDB_LITE
 
 #include <stdint.h>
+#include "rocksdb/sst_dump_tool.h"
 
 #include "file/random_access_file_reader.h"
 #include "port/stack_trace.h"
-#include "rocksdb/convenience.h"
 #include "rocksdb/filter_policy.h"
-#include "rocksdb/sst_dump_tool.h"
 #include "table/block_based/block_based_table_factory.h"
 #include "table/table_builder.h"
 #include "test_util/testharness.h"
@@ -57,7 +56,10 @@ class SSTDumpToolTest : public testing::Test {
 
  public:
   SSTDumpToolTest() : env_(Env::Default()) {
-    EXPECT_OK(test::CreateEnvFromSystem(ConfigOptions(), &env_, &env_guard_));
+    const char* test_env_uri = getenv("TEST_ENV_URI");
+    if (test_env_uri) {
+      Env::LoadEnv(test_env_uri, &env_, &env_guard_);
+    }
     test_dir_ = test::PerThreadDBPath(env_, "sst_dump_test_db");
     Status s = env_->CreateDirIfMissing(test_dir_);
     EXPECT_OK(s);
@@ -92,26 +94,30 @@ class SSTDumpToolTest : public testing::Test {
 
   void createSST(const Options& opts, const std::string& file_name) {
     Env* test_env = opts.env;
-    FileOptions file_options(opts);
+    EnvOptions env_options(opts);
     ReadOptions read_options;
-    const ImmutableOptions imoptions(opts);
+    const ImmutableCFOptions imoptions(opts);
     const MutableCFOptions moptions(opts);
     ROCKSDB_NAMESPACE::InternalKeyComparator ikc(opts.comparator);
     std::unique_ptr<TableBuilder> tb;
 
-    IntTblPropCollectorFactories int_tbl_prop_collector_factories;
-    std::unique_ptr<WritableFileWriter> file_writer;
-    ASSERT_OK(WritableFileWriter::Create(test_env->GetFileSystem(), file_name,
-                                         file_options, &file_writer, nullptr));
+    std::unique_ptr<WritableFile> file;
+    ASSERT_OK(test_env->NewWritableFile(file_name, &file, env_options));
 
+    std::vector<std::unique_ptr<IntTblPropCollectorFactory> >
+        int_tbl_prop_collector_factories;
+    std::unique_ptr<WritableFileWriter> file_writer(
+        new WritableFileWriter(NewLegacyWritableFileWrapper(std::move(file)),
+                               file_name, EnvOptions()));
     std::string column_family_name;
     int unknown_level = -1;
     tb.reset(opts.table_factory->NewTableBuilder(
         TableBuilderOptions(
             imoptions, moptions, ikc, &int_tbl_prop_collector_factories,
-            CompressionType::kNoCompression, CompressionOptions(),
-            TablePropertiesCollectorFactory::Context::kUnknownColumnFamily,
-            column_family_name, unknown_level),
+            CompressionType::kNoCompression, 0 /* sample_for_compression */,
+            CompressionOptions(), false /* skip_filters */, column_family_name,
+            unknown_level),
+        TablePropertiesCollectorFactory::Context::kUnknownColumnFamily,
         file_writer.get()));
 
     // Populate slightly more than 1K keys
@@ -120,7 +126,7 @@ class SSTDumpToolTest : public testing::Test {
       tb->Add(MakeKey(i), MakeValue(i));
     }
     ASSERT_OK(tb->Finish());
-    ASSERT_OK(file_writer->Close());
+    file_writer->Close();
   }
 
  protected:
@@ -387,8 +393,6 @@ TEST_F(SSTDumpToolTest, RawOutput) {
 
   ASSERT_EQ(kNumKey, key_count);
 
-  raw_file.close();
-
   cleanup(opts, file_path);
   for (int i = 0; i < 3; i++) {
     delete[] usage[i];
@@ -396,6 +400,14 @@ TEST_F(SSTDumpToolTest, RawOutput) {
 }
 
 }  // namespace ROCKSDB_NAMESPACE
+
+#ifdef ROCKSDB_UNITTESTS_WITH_CUSTOM_OBJECTS_FROM_STATIC_LIBS
+extern "C" {
+void RegisterCustomObjects(int argc, char** argv);
+}
+#else
+void RegisterCustomObjects(int /*argc*/, char** /*argv*/) {}
+#endif  // !ROCKSDB_UNITTESTS_WITH_CUSTOM_OBJECTS_FROM_STATIC_LIBS
 
 int main(int argc, char** argv) {
   ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();

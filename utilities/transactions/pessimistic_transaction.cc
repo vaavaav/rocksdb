@@ -14,7 +14,6 @@
 
 #include "db/column_family.h"
 #include "db/db_impl/db_impl.h"
-#include "logging/logging.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/db.h"
 #include "rocksdb/snapshot.h"
@@ -121,7 +120,7 @@ void PessimisticTransaction::Reinitialize(
 
 bool PessimisticTransaction::IsExpired() const {
   if (expiration_time_ > 0) {
-    if (dbimpl_->GetSystemClock()->NowMicros() >= expiration_time_) {
+    if (db_->GetEnv()->NowMicros() >= expiration_time_) {
       // Transaction is expired.
       return true;
     }
@@ -174,6 +173,7 @@ Status PessimisticTransaction::CommitBatch(WriteBatch* batch) {
 }
 
 Status PessimisticTransaction::Prepare() {
+
   if (name_.empty()) {
     return Status::InvalidArgument(
         "Cannot prepare a transaction that has not been named.");
@@ -564,20 +564,9 @@ Status PessimisticTransaction::TryLock(ColumnFamilyHandle* column_family,
   }
   uint32_t cfh_id = GetColumnFamilyID(column_family);
   std::string key_str = key.ToString();
-
-  PointLockStatus status;
-  bool lock_upgrade;
-  bool previously_locked;
-  if (tracked_locks_->IsPointLockSupported()) {
-    status = tracked_locks_->GetPointLockStatus(cfh_id, key_str);
-    previously_locked = status.locked;
-    lock_upgrade = previously_locked && exclusive && !status.exclusive;
-  } else {
-    // If the record is tracked, we can assume it was locked, too.
-    previously_locked = assume_tracked;
-    status.locked = false;
-    lock_upgrade = false;
-  }
+  PointLockStatus status = tracked_locks_->GetPointLockStatus(cfh_id, key_str);
+  bool previously_locked = status.locked;
+  bool lock_upgrade = previously_locked && exclusive && !status.exclusive;
 
   // Lock this key if this transactions hasn't already locked it or we require
   // an upgrade.
@@ -596,8 +585,7 @@ Status PessimisticTransaction::TryLock(ColumnFamilyHandle* column_family,
   SequenceNumber tracked_at_seq =
       status.locked ? status.seq : kMaxSequenceNumber;
   if (!do_validate || snapshot_ == nullptr) {
-    if (assume_tracked && !previously_locked &&
-        tracked_locks_->IsPointLockSupported()) {
+    if (assume_tracked && !previously_locked) {
       s = Status::InvalidArgument(
           "assume_tracked is set but it is not tracked yet");
     }
@@ -654,33 +642,15 @@ Status PessimisticTransaction::TryLock(ColumnFamilyHandle* column_family,
       TrackKey(cfh_id, key_str, tracked_at_seq, read_only, exclusive);
     } else {
 #ifndef NDEBUG
-      if (tracked_locks_->IsPointLockSupported()) {
-        PointLockStatus lock_status =
-            tracked_locks_->GetPointLockStatus(cfh_id, key_str);
-        assert(lock_status.locked);
-        assert(lock_status.seq <= tracked_at_seq);
-        assert(lock_status.exclusive == exclusive);
-      }
+      PointLockStatus lock_status =
+          tracked_locks_->GetPointLockStatus(cfh_id, key_str);
+      assert(lock_status.locked);
+      assert(lock_status.seq <= tracked_at_seq);
+      assert(lock_status.exclusive == exclusive);
 #endif
     }
   }
 
-  return s;
-}
-
-Status PessimisticTransaction::GetRangeLock(ColumnFamilyHandle* column_family,
-                                            const Endpoint& start_endp,
-                                            const Endpoint& end_endp) {
-  ColumnFamilyHandle* cfh =
-      column_family ? column_family : db_impl_->DefaultColumnFamily();
-  uint32_t cfh_id = GetColumnFamilyID(cfh);
-
-  Status s = txn_db_impl_->TryRangeLock(this, cfh_id, start_endp, end_endp);
-
-  if (s.ok()) {
-    RangeLockRequest req{cfh_id, start_endp, end_endp};
-    tracked_locks_->Track(req);
-  }
   return s;
 }
 
@@ -711,9 +681,8 @@ Status PessimisticTransaction::ValidateSnapshot(
   ColumnFamilyHandle* cfh =
       column_family ? column_family : db_impl_->DefaultColumnFamily();
 
-  // TODO (yanqin): support conflict checking based on timestamp.
   return TransactionUtil::CheckKeyForConflicts(
-      db_impl_, cfh, key.ToString(), snap_seq, nullptr, false /* cache_only */);
+      db_impl_, cfh, key.ToString(), snap_seq, false /* cache_only */);
 }
 
 bool PessimisticTransaction::TryStealingLocks() {

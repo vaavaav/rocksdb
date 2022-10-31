@@ -38,7 +38,6 @@ class SimulatedBackgroundTask {
   void Run() {
     std::unique_lock<std::mutex> l(mutex_);
     running_count_++;
-    bg_cv_.notify_all();
     Env::Default()->GetThreadStatusUpdater()->SetColumnFamilyInfoKey(cf_key_);
     Env::Default()->GetThreadStatusUpdater()->SetThreadOperation(
         operation_type_);
@@ -59,10 +58,9 @@ class SimulatedBackgroundTask {
     bg_cv_.notify_all();
   }
 
-  void WaitUntilScheduled(int job_count) {
-    std::unique_lock<std::mutex> l(mutex_);
+  void WaitUntilScheduled(int job_count, Env* env) {
     while (running_count_ < job_count) {
-      bg_cv_.wait(l);
+      env->SleepForMicroseconds(1000);
     }
   }
 
@@ -141,13 +139,13 @@ TEST_F(ThreadListTest, SimpleColumnFamilyInfoTest) {
     env->Schedule(&SimulatedBackgroundTask::DoSimulatedTask,
         &running_task, Env::Priority::LOW);
   }
-  running_task.WaitUntilScheduled(kSimulatedHighPriThreads +
-                                  kSimulatedLowPriThreads);
+  running_task.WaitUntilScheduled(
+      kSimulatedHighPriThreads + kSimulatedLowPriThreads, env);
 
   std::vector<ThreadStatus> thread_list;
 
   // Verify the number of running threads in each pool.
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
   int running_count[ThreadStatus::NUM_THREAD_TYPES] = {0};
   for (auto thread_status : thread_list) {
     if (thread_status.cf_name == "pikachu" &&
@@ -168,7 +166,7 @@ TEST_F(ThreadListTest, SimpleColumnFamilyInfoTest) {
   running_task.WaitUntilDone();
 
   // Verify none of the threads are running
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
 
   for (int i = 0; i < ThreadStatus::NUM_THREAD_TYPES; ++i) {
     running_count[i] = 0;
@@ -258,32 +256,32 @@ TEST_F(ThreadListTest, SimpleEventTest) {
     env->Schedule(&SimulatedBackgroundTask::DoSimulatedTask,
         &flush_write_task, Env::Priority::HIGH);
   }
-  flush_write_task.WaitUntilScheduled(kFlushWriteTasks);
+  flush_write_task.WaitUntilScheduled(kFlushWriteTasks, env);
 
   for (int t = 0; t < kCompactionWriteTasks; ++t) {
     env->Schedule(&SimulatedBackgroundTask::DoSimulatedTask,
         &compaction_write_task, Env::Priority::LOW);
   }
-  compaction_write_task.WaitUntilScheduled(kCompactionWriteTasks);
+  compaction_write_task.WaitUntilScheduled(kCompactionWriteTasks, env);
 
   for (int t = 0; t < kCompactionReadTasks; ++t) {
     env->Schedule(&SimulatedBackgroundTask::DoSimulatedTask,
         &compaction_read_task, Env::Priority::LOW);
   }
-  compaction_read_task.WaitUntilScheduled(kCompactionReadTasks);
+  compaction_read_task.WaitUntilScheduled(kCompactionReadTasks, env);
 
   for (int t = 0; t < kCompactionWaitTasks; ++t) {
     env->Schedule(&SimulatedBackgroundTask::DoSimulatedTask,
         &compaction_wait_task, Env::Priority::LOW);
   }
-  compaction_wait_task.WaitUntilScheduled(kCompactionWaitTasks);
+  compaction_wait_task.WaitUntilScheduled(kCompactionWaitTasks, env);
 
   // verify the thread-status
   int operation_counts[ThreadStatus::NUM_OP_TYPES] = {0};
   int state_counts[ThreadStatus::NUM_STATE_TYPES] = {0};
 
   std::vector<ThreadStatus> thread_list;
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
   UpdateStatusCounts(thread_list, operation_counts, state_counts);
   VerifyAndResetCounts(correct_operation_counts, operation_counts,
                        ThreadStatus::NUM_OP_TYPES);
@@ -295,7 +293,7 @@ TEST_F(ThreadListTest, SimpleEventTest) {
   UpdateCount(correct_operation_counts, ThreadStatus::OP_COMPACTION,
               ThreadStatus::OP_UNKNOWN, kCompactionWaitTasks);
 
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
   UpdateStatusCounts(thread_list, operation_counts, state_counts);
   VerifyAndResetCounts(correct_operation_counts, operation_counts,
                        ThreadStatus::NUM_OP_TYPES);
@@ -307,7 +305,7 @@ TEST_F(ThreadListTest, SimpleEventTest) {
   UpdateCount(correct_operation_counts, ThreadStatus::OP_FLUSH,
               ThreadStatus::OP_UNKNOWN, kFlushWriteTasks);
 
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
   UpdateStatusCounts(thread_list, operation_counts, state_counts);
   VerifyAndResetCounts(correct_operation_counts, operation_counts,
                        ThreadStatus::NUM_OP_TYPES);
@@ -319,7 +317,7 @@ TEST_F(ThreadListTest, SimpleEventTest) {
   UpdateCount(correct_operation_counts, ThreadStatus::OP_COMPACTION,
               ThreadStatus::OP_UNKNOWN, kCompactionWriteTasks);
 
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
   UpdateStatusCounts(thread_list, operation_counts, state_counts);
   VerifyAndResetCounts(correct_operation_counts, operation_counts,
                        ThreadStatus::NUM_OP_TYPES);
@@ -331,7 +329,7 @@ TEST_F(ThreadListTest, SimpleEventTest) {
   UpdateCount(correct_operation_counts, ThreadStatus::OP_COMPACTION,
               ThreadStatus::OP_UNKNOWN, kCompactionReadTasks);
 
-  ASSERT_OK(env->GetThreadList(&thread_list));
+  env->GetThreadList(&thread_list);
   UpdateStatusCounts(thread_list, operation_counts, state_counts);
   VerifyAndResetCounts(correct_operation_counts, operation_counts,
                        ThreadStatus::NUM_OP_TYPES);

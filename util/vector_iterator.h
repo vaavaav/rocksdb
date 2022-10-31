@@ -16,20 +16,18 @@ namespace ROCKSDB_NAMESPACE {
 class VectorIterator : public InternalIterator {
  public:
   VectorIterator(std::vector<std::string> keys, std::vector<std::string> values,
-                 const Comparator* icmp = nullptr)
+                 const InternalKeyComparator* icmp)
       : keys_(std::move(keys)),
         values_(std::move(values)),
-        current_(keys_.size()),
-        indexed_cmp_(icmp, &keys_) {
+        indexed_cmp_(icmp, &keys_),
+        current_(0) {
     assert(keys_.size() == values_.size());
 
     indices_.reserve(keys_.size());
     for (size_t i = 0; i < keys_.size(); i++) {
       indices_.push_back(i);
     }
-    if (icmp != nullptr) {
-      std::sort(indices_.begin(), indices_.end(), indexed_cmp_);
-    }
+    std::sort(indices_.begin(), indices_.end(), indexed_cmp_);
   }
 
   virtual bool Valid() const override {
@@ -40,27 +38,15 @@ class VectorIterator : public InternalIterator {
   virtual void SeekToLast() override { current_ = indices_.size() - 1; }
 
   virtual void Seek(const Slice& target) override {
-    if (indexed_cmp_.cmp != nullptr) {
-      current_ = std::lower_bound(indices_.begin(), indices_.end(), target,
-                                  indexed_cmp_) -
-                 indices_.begin();
-    } else {
-      current_ =
-          std::lower_bound(keys_.begin(), keys_.end(), target.ToString()) -
-          keys_.begin();
-    }
+    current_ = std::lower_bound(indices_.begin(), indices_.end(), target,
+                                indexed_cmp_) -
+               indices_.begin();
   }
 
   virtual void SeekForPrev(const Slice& target) override {
-    if (indexed_cmp_.cmp != nullptr) {
-      current_ = std::upper_bound(indices_.begin(), indices_.end(), target,
-                                  indexed_cmp_) -
-                 indices_.begin();
-    } else {
-      current_ =
-          std::upper_bound(keys_.begin(), keys_.end(), target.ToString()) -
-          keys_.begin();
-    }
+    current_ = std::lower_bound(indices_.begin(), indices_.end(), target,
+                                indexed_cmp_) -
+               indices_.begin();
     if (!Valid()) {
       SeekToLast();
     } else {
@@ -83,14 +69,9 @@ class VectorIterator : public InternalIterator {
   virtual bool IsKeyPinned() const override { return true; }
   virtual bool IsValuePinned() const override { return true; }
 
- protected:
-  std::vector<std::string> keys_;
-  std::vector<std::string> values_;
-  size_t current_;
-
  private:
   struct IndexedKeyComparator {
-    IndexedKeyComparator(const Comparator* c,
+    IndexedKeyComparator(const InternalKeyComparator* c,
                          const std::vector<std::string>* ks)
         : cmp(c), keys(ks) {}
 
@@ -106,12 +87,15 @@ class VectorIterator : public InternalIterator {
       return cmp->Compare(a, (*keys)[b]) < 0;
     }
 
-    const Comparator* cmp;
+    const InternalKeyComparator* cmp;
     const std::vector<std::string>* keys;
   };
 
+  std::vector<std::string> keys_;
+  std::vector<std::string> values_;
   IndexedKeyComparator indexed_cmp_;
   std::vector<size_t> indices_;
+  size_t current_;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

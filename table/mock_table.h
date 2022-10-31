@@ -49,8 +49,7 @@ class MockTableFactory : public TableFactory {
   };
 
   MockTableFactory();
-  static const char* kClassName() { return "MockTable"; }
-  const char* Name() const override { return kClassName(); }
+  const char* Name() const override { return "MockTable"; }
   using TableFactory::NewTableReader;
   Status NewTableReader(
       const ReadOptions& ro, const TableReaderOptions& table_reader_options,
@@ -59,7 +58,7 @@ class MockTableFactory : public TableFactory {
       bool prefetch_index_and_filter_in_cache = true) const override;
   TableBuilder* NewTableBuilder(
       const TableBuilderOptions& table_builder_options,
-      WritableFileWriter* file) const override;
+      uint32_t column_familly_id, WritableFileWriter* file) const override;
 
   // This function will directly create mock table instead of going through
   // MockTableBuilder. file_contents has to have a format of <internal_key,
@@ -78,8 +77,8 @@ class MockTableFactory : public TableFactory {
   void AssertLatestFile(const KVVector& file_contents);
 
  private:
-  Status GetAndWriteNextID(WritableFileWriter* file, uint32_t* id) const;
-  Status GetIDFromFile(RandomAccessFileReader* file, uint32_t* id) const;
+  uint32_t GetAndWriteNextID(WritableFileWriter* file) const;
+  uint32_t GetIDFromFile(RandomAccessFileReader* file) const;
 
   mutable MockTableFileSystem file_system_;
   mutable std::atomic<uint32_t> next_id_;

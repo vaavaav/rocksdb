@@ -19,7 +19,6 @@
 #endif
 
 #include <stdlib.h>
-
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -32,13 +31,12 @@
 #include "monitoring/thread_status_util.h"
 #include "port/port.h"
 #include "test_util/sync_point.h"
-#include "util/string_util.h"
 
 namespace ROCKSDB_NAMESPACE {
 
 void ThreadPoolImpl::PthreadCall(const char* label, int result) {
   if (result != 0) {
-    fprintf(stderr, "pthread %s: %s\n", label, errnoStr(result).c_str());
+    fprintf(stderr, "pthread %s: %s\n", label, strerror(result));
     abort();
   }
 }
@@ -200,12 +198,12 @@ void ThreadPoolImpl::Impl::BGThread(size_t thread_id) {
           queue_.empty()) {
         break;
        }
-    } else if (IsLastExcessiveThread(thread_id)) {
+    }
+
+    if (IsLastExcessiveThread(thread_id)) {
       // Current thread is the last generated one and is excessive.
       // We always terminate excessive thread in the reverse order of
-      // generation time. But not when `exit_all_threads_ == true`,
-      // otherwise `JoinThreads()` could try to `join()` a `detach()`ed
-      // thread.
+      // generation time.
       auto& terminating_thread = bgthreads_.back();
       terminating_thread.detach();
       bgthreads_.pop_back();
@@ -347,6 +345,7 @@ void ThreadPoolImpl::Impl::StartBGThreads() {
     for (char c : thread_priority) {
       thread_name_stream << static_cast<char>(tolower(c));
     }
+    thread_name_stream << bgthreads_.size();
     pthread_setname_np(th_handle, thread_name_stream.str().c_str());
 #endif
 #endif

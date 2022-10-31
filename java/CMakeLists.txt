@@ -13,7 +13,6 @@ set(JNI_NATIVE_SOURCES
         rocksjni/cassandra_value_operator.cc
         rocksjni/checkpoint.cc
         rocksjni/clock_cache.cc
-        rocksjni/cache.cc
         rocksjni/columnfamilyhandle.cc
         rocksjni/compaction_filter.cc
         rocksjni/compaction_filter_factory.cc
@@ -66,7 +65,6 @@ set(JNI_NATIVE_SOURCES
         rocksjni/table.cc
         rocksjni/table_filter.cc
         rocksjni/table_filter_jnicallback.cc
-        rocksjni/testable_event_listener.cc
         rocksjni/thread_status.cc
         rocksjni/trace_writer.cc
         rocksjni/trace_writer_jnicallback.cc
@@ -112,7 +110,6 @@ set(JAVA_MAIN_CLASSES
   src/main/java/org/rocksdb/BlockBasedTableConfig.java
   src/main/java/org/rocksdb/BloomFilter.java
   src/main/java/org/rocksdb/BuiltinComparator.java
-  src/main/java/org/rocksdb/ByteBufferGetStatus.java
   src/main/java/org/rocksdb/Cache.java
   src/main/java/org/rocksdb/CassandraCompactionFilter.java
   src/main/java/org/rocksdb/CassandraValueMergeOperator.java
@@ -168,7 +165,6 @@ set(JAVA_MAIN_CLASSES
   src/main/java/org/rocksdb/LevelMetaData.java
   src/main/java/org/rocksdb/ConcurrentTaskLimiter.java
   src/main/java/org/rocksdb/ConcurrentTaskLimiterImpl.java
-  src/main/java/org/rocksdb/KeyMayExist.java
   src/main/java/org/rocksdb/LiveFileMetaData.java
   src/main/java/org/rocksdb/LogFile.java
   src/main/java/org/rocksdb/Logger.java
@@ -191,7 +187,6 @@ set(JAVA_MAIN_CLASSES
   src/main/java/org/rocksdb/OptimisticTransactionDB.java
   src/main/java/org/rocksdb/OptimisticTransactionOptions.java
   src/main/java/org/rocksdb/Options.java
-  src/main/java/org/rocksdb/OptionString.java
   src/main/java/org/rocksdb/OptionsUtil.java
   src/main/java/org/rocksdb/PersistentCache.java
   src/main/java/org/rocksdb/PlainTableConfig.java
@@ -288,7 +283,6 @@ set(JAVA_TEST_CLASSES
   src/test/java/org/rocksdb/WriteBatchTest.java
   src/test/java/org/rocksdb/util/CapturingWriteBatchHandler.java
   src/test/java/org/rocksdb/util/WriteBatchGetter.java
-  src/test/java/org/rocksdb/test/TestableEventListener.java
 )
 
 include(FindJava)
@@ -430,7 +424,6 @@ if(${CMAKE_VERSION} VERSION_LESS "3.11.4" OR (${Java_VERSION_MINOR} STREQUAL "7"
           org.rocksdb.CassandraValueMergeOperator
           org.rocksdb.Checkpoint
           org.rocksdb.ClockCache
-          org.rocksdb.Cache
           org.rocksdb.ColumnFamilyHandle
           org.rocksdb.ColumnFamilyOptions
           org.rocksdb.CompactionJobInfo
@@ -441,8 +434,6 @@ if(${CMAKE_VERSION} VERSION_LESS "3.11.4" OR (${Java_VERSION_MINOR} STREQUAL "7"
           org.rocksdb.CompactRangeOptions
           org.rocksdb.ComparatorOptions
           org.rocksdb.CompressionOptions
-          org.rocksdb.ConcurrentTaskLimiterImpl
-          org.rocksdb.ConfigOptions
           org.rocksdb.DBOptions
           org.rocksdb.DirectSlice
           org.rocksdb.Env
@@ -511,7 +502,6 @@ if(${CMAKE_VERSION} VERSION_LESS "3.11.4" OR (${Java_VERSION_MINOR} STREQUAL "7"
           org.rocksdb.WriteBatchTest
           org.rocksdb.WriteBatchTestInternalHelper
           org.rocksdb.WriteBufferManager
-          org.rocksdb.test.TestableEventListener
   )
 
   create_javah(

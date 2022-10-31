@@ -47,7 +47,7 @@
 #undef DeleteFile
 
 #ifndef _SSIZE_T_DEFINED
-using ssize_t = SSIZE_T;
+typedef SSIZE_T ssize_t;
 #endif
 
 // size_t printf formatting named in the manner of C99 standard formatting
@@ -146,16 +146,6 @@ class Mutex {
     locked_ = false;
 #endif
     mutex_.unlock();
-  }
-
-  bool TryLock() {
-    bool ret = mutex_.try_lock();
-#ifndef NDEBUG
-    if (ret) {
-      locked_ = true;
-    }
-#endif
-    return ret;
   }
 
   // this will assert if the mutex is not locked
@@ -302,7 +292,7 @@ static inline void AsmVolatilePause() {
 extern int PhysicalCoreID();
 
 // For Thread Local Storage abstraction
-using pthread_key_t = DWORD;
+typedef DWORD pthread_key_t;
 
 inline int pthread_key_create(pthread_key_t* key, void (*destructor)(void*)) {
   // Not used
@@ -357,12 +347,6 @@ using ThreadId = int;
 
 extern void SetCpuPriority(ThreadId id, CpuPriority priority);
 
-int64_t GetProcessID();
-
-// Uses platform APIs to generate a 36-character RFC-4122 UUID. Returns
-// true on success or false on failure.
-bool GenerateRfcUuid(std::string* output);
-
 }  // namespace port
 
 
@@ -371,7 +355,6 @@ bool GenerateRfcUuid(std::string* output);
 #define RX_FILESTRING std::wstring
 #define RX_FN(a) ROCKSDB_NAMESPACE::port::utf8_to_utf16(a)
 #define FN_TO_RX(a) ROCKSDB_NAMESPACE::port::utf16_to_utf8(a)
-#define RX_FNCMP(a, b) ::wcscmp(a, RX_FN(b).c_str())
 #define RX_FNLEN(a) ::wcslen(a)
 
 #define RX_DeleteFile DeleteFileW
@@ -396,7 +379,6 @@ bool GenerateRfcUuid(std::string* output);
 #define RX_FILESTRING std::string
 #define RX_FN(a) a
 #define FN_TO_RX(a) a
-#define RX_FNCMP(a, b) strcmp(a, b)
 #define RX_FNLEN(a) strlen(a)
 
 #define RX_DeleteFile DeleteFileA
@@ -406,7 +388,7 @@ bool GenerateRfcUuid(std::string* output);
 #define RX_FindFirstFileEx FindFirstFileExA
 #define RX_CreateDirectory CreateDirectoryA
 #define RX_FindNextFile FindNextFileA
-#define RX_WIN32_FIND_DATA WIN32_FIND_DATAA
+#define RX_WIN32_FIND_DATA WIN32_FIND_DATA
 #define RX_CreateDirectory CreateDirectoryA
 #define RX_RemoveDirectory RemoveDirectoryA
 #define RX_GetFileAttributesEx GetFileAttributesExA

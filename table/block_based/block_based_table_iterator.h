@@ -27,11 +27,11 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
       bool check_filter, bool need_upper_bound_check,
       const SliceTransform* prefix_extractor, TableReaderCaller caller,
       size_t compaction_readahead_size = 0, bool allow_unprepared_value = false)
-      : index_iter_(std::move(index_iter)),
-        table_(table),
+      : table_(table),
         read_options_(read_options),
         icomp_(icomp),
         user_comparator_(icomp.user_comparator()),
+        index_iter_(std::move(index_iter)),
         pinned_iters_mgr_(nullptr),
         prefix_extractor_(prefix_extractor),
         lookup_context_(caller),
@@ -149,29 +149,6 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
     }
   }
 
-  void GetReadaheadState(ReadaheadFileInfo* readahead_file_info) override {
-    if (block_prefetcher_.prefetch_buffer() != nullptr &&
-        read_options_.adaptive_readahead) {
-      block_prefetcher_.prefetch_buffer()->GetReadaheadState(
-          &(readahead_file_info->data_block_readahead_info));
-      if (index_iter_) {
-        index_iter_->GetReadaheadState(readahead_file_info);
-      }
-    }
-  }
-
-  void SetReadaheadState(ReadaheadFileInfo* readahead_file_info) override {
-    if (read_options_.adaptive_readahead) {
-      block_prefetcher_.SetReadaheadState(
-          &(readahead_file_info->data_block_readahead_info));
-      if (index_iter_) {
-        index_iter_->SetReadaheadState(readahead_file_info);
-      }
-    }
-  }
-
-  std::unique_ptr<InternalIteratorBase<IndexValue>> index_iter_;
-
  private:
   enum class IterDirection {
     kForward,
@@ -210,6 +187,7 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
   const ReadOptions& read_options_;
   const InternalKeyComparator& icomp_;
   UserComparatorWrapper user_comparator_;
+  std::unique_ptr<InternalIteratorBase<IndexValue>> index_iter_;
   PinnedIteratorsManager* pinned_iters_mgr_;
   DataBlockIter block_iter_;
   const SliceTransform* prefix_extractor_;
@@ -252,7 +230,7 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
 
   bool CheckPrefixMayMatch(const Slice& ikey, IterDirection direction) {
     if (need_upper_bound_check_ && direction == IterDirection::kBackward) {
-      // Upper bound check isn't sufficient for backward direction to
+      // Upper bound check isn't sufficnet for backward direction to
       // guarantee the same result as total order, so disable prefix
       // check.
       return true;

@@ -31,16 +31,15 @@ class EnvLogger : public Logger {
             const std::string& fname, const EnvOptions& options, Env* env,
             InfoLogLevel log_level = InfoLogLevel::ERROR_LEVEL)
       : Logger(log_level),
-        env_(env),
-        clock_(env_->GetSystemClock().get()),
-        file_(std::move(writable_file), fname, options, clock_),
+        file_(std::move(writable_file), fname, options, env),
         last_flush_micros_(0),
+        env_(env),
         flush_pending_(false) {}
 
   ~EnvLogger() {
     if (!closed_) {
       closed_ = true;
-      CloseHelper().PermitUncheckedError();
+      CloseHelper();
     }
   }
 
@@ -49,9 +48,9 @@ class EnvLogger : public Logger {
     mutex_.AssertHeld();
     if (flush_pending_) {
       flush_pending_ = false;
-      file_.Flush().PermitUncheckedError();
+      file_.Flush();
     }
-    last_flush_micros_ = clock_->NowMicros();
+    last_flush_micros_ = env_->NowMicros();
   }
 
   void Flush() override {
@@ -135,9 +134,9 @@ class EnvLogger : public Logger {
       assert(p <= limit);
       mutex_.Lock();
       // We will ignore any error returned by Append().
-      file_.Append(Slice(base, p - base)).PermitUncheckedError();
+      file_.Append(Slice(base, p - base));
       flush_pending_ = true;
-      const uint64_t now_micros = clock_->NowMicros();
+      const uint64_t now_micros = env_->NowMicros();
       if (now_micros - last_flush_micros_ >= flush_every_seconds_ * 1000000) {
         FlushLocked();
       }
@@ -155,12 +154,11 @@ class EnvLogger : public Logger {
   }
 
  private:
-  Env* env_;
-  SystemClock* clock_;
   WritableFileWriter file_;
   mutable port::Mutex mutex_;  // Mutex to protect the shared variables below.
   const static uint64_t flush_every_seconds_ = 5;
   std::atomic_uint_fast64_t last_flush_micros_;
+  Env* env_;
   std::atomic<bool> flush_pending_;
 };
 

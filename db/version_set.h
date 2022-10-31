@@ -26,7 +26,6 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -60,7 +59,6 @@ namespace log {
 class Writer;
 }
 
-class BlobIndex;
 class Compaction;
 class LogBuffer;
 class LookupKey;
@@ -71,8 +69,6 @@ class WriteBufferManager;
 class MergeContext;
 class ColumnFamilySet;
 class MergeIteratorBuilder;
-class SystemClock;
-class ManifestTailer;
 
 // VersionEdit is always supposed to be valid and it is used to point at
 // entries in Manifest. Ideally it should not be used as a container to
@@ -150,7 +146,7 @@ class VersionStorageInfo {
   // We use compaction scores to figure out which compaction to do next
   // REQUIRES: db_mutex held!!
   // TODO find a better way to pass compaction_options_fifo.
-  void ComputeCompactionScore(const ImmutableOptions& immutable_options,
+  void ComputeCompactionScore(const ImmutableCFOptions& immutable_cf_options,
                               const MutableCFOptions& mutable_cf_options);
 
   // Estimate est_comp_needed_bytes_
@@ -163,13 +159,13 @@ class VersionStorageInfo {
 
   // This computes ttl_expired_files_ and is called by
   // ComputeCompactionScore()
-  void ComputeExpiredTtlFiles(const ImmutableOptions& ioptions,
+  void ComputeExpiredTtlFiles(const ImmutableCFOptions& ioptions,
                               const uint64_t ttl);
 
   // This computes files_marked_for_periodic_compaction_ and is called by
   // ComputeCompactionScore()
   void ComputeFilesMarkedForPeriodicCompaction(
-      const ImmutableOptions& ioptions,
+      const ImmutableCFOptions& ioptions,
       const uint64_t periodic_compaction_seconds);
 
   // This computes bottommost_files_marked_for_compaction_ and is called by
@@ -184,21 +180,12 @@ class VersionStorageInfo {
   // REQUIRES: DB mutex held
   void ComputeBottommostFilesMarkedForCompaction();
 
-  // This computes files_marked_for_forced_blob_gc_ and is called by
-  // ComputeCompactionScore()
-  //
-  // REQUIRES: DB mutex held
-  void ComputeFilesMarkedForForcedBlobGC(
-      double blob_garbage_collection_age_cutoff,
-      double blob_garbage_collection_force_threshold);
-
   // Generate level_files_brief_ from files_
   void GenerateLevelFilesBrief();
   // Sort all files for this version based on their file size and
   // record results in files_by_compaction_pri_. The largest files are listed
   // first.
-  void UpdateFilesByCompactionPri(const ImmutableOptions& immutable_options,
-                                  const MutableCFOptions& mutable_cf_options);
+  void UpdateFilesByCompactionPri(CompactionPri compaction_pri);
 
   void GenerateLevel0NonOverlapping();
   bool level0_non_overlapping() const {
@@ -354,19 +341,6 @@ class VersionStorageInfo {
   using BlobFiles = std::map<uint64_t, std::shared_ptr<BlobFileMetaData>>;
   const BlobFiles& GetBlobFiles() const { return blob_files_; }
 
-  uint64_t GetTotalBlobFileSize() const {
-    uint64_t total_blob_bytes = 0;
-
-    for (const auto& pair : blob_files_) {
-      const auto& meta = pair.second;
-      assert(meta);
-
-      total_blob_bytes += meta->GetBlobFileSize();
-    }
-
-    return total_blob_bytes;
-  }
-
   const ROCKSDB_NAMESPACE::LevelFilesBrief& LevelFilesBrief(int level) const {
     assert(level < static_cast<int>(level_files_brief_.size()));
     return level_files_brief_[level];
@@ -413,14 +387,6 @@ class VersionStorageInfo {
     return bottommost_files_marked_for_compaction_;
   }
 
-  // REQUIRES: This version has been saved (see VersionSet::SaveTo)
-  // REQUIRES: DB mutex held during access
-  const autovector<std::pair<int, FileMetaData*>>& FilesMarkedForForcedBlobGC()
-      const {
-    assert(finalized_);
-    return files_marked_for_forced_blob_gc_;
-  }
-
   int base_level() const { return base_level_; }
   double level_multiplier() const { return level_multiplier_; }
 
@@ -464,7 +430,7 @@ class VersionStorageInfo {
 
   // Return the maximum overlapping data (in bytes) at next level for any
   // file at a level >= 1.
-  uint64_t MaxNextLevelOverlappingBytes();
+  int64_t MaxNextLevelOverlappingBytes();
 
   // Return a human readable string that describes this version's contents.
   std::string DebugString(bool hex = false) const;
@@ -491,7 +457,7 @@ class VersionStorageInfo {
     next_file_to_compact_by_size_[level] = 0;
   }
 
-  const InternalKeyComparator* InternalComparator() const {
+  const InternalKeyComparator* InternalComparator() {
     return internal_comparator_;
   }
 
@@ -499,7 +465,7 @@ class VersionStorageInfo {
   uint64_t MaxBytesForLevel(int level) const;
 
   // Must be called after any change to MutableCFOptions.
-  void CalculateBaseBytes(const ImmutableOptions& ioptions,
+  void CalculateBaseBytes(const ImmutableCFOptions& ioptions,
                           const MutableCFOptions& options);
 
   // Returns an estimate of the amount of live data in bytes.
@@ -602,8 +568,6 @@ class VersionStorageInfo {
   autovector<std::pair<int, FileMetaData*>> bottommost_files_;
   autovector<std::pair<int, FileMetaData*>>
       bottommost_files_marked_for_compaction_;
-
-  autovector<std::pair<int, FileMetaData*>> files_marked_for_forced_blob_gc_;
 
   // Threshold for needing to mark another bottommost file. Maintain it so we
   // can quickly check when releasing a snapshot whether more bottommost files
@@ -708,39 +672,15 @@ class Version {
   //    If the key has any merge operands then store them in
   //    merge_context.operands_list and don't merge the operands
   // REQUIRES: lock is not held
-  // REQUIRES: pinned_iters_mgr != nullptr
   void Get(const ReadOptions&, const LookupKey& key, PinnableSlice* value,
            std::string* timestamp, Status* status, MergeContext* merge_context,
            SequenceNumber* max_covering_tombstone_seq,
-           PinnedIteratorsManager* pinned_iters_mgr,
            bool* value_found = nullptr, bool* key_exists = nullptr,
            SequenceNumber* seq = nullptr, ReadCallback* callback = nullptr,
            bool* is_blob = nullptr, bool do_merge = true);
 
   void MultiGet(const ReadOptions&, MultiGetRange* range,
-                ReadCallback* callback = nullptr);
-
-  // Interprets blob_index_slice as a blob reference, and (assuming the
-  // corresponding blob file is part of this Version) retrieves the blob and
-  // saves it in *value.
-  // REQUIRES: blob_index_slice stores an encoded blob reference
-  Status GetBlob(const ReadOptions& read_options, const Slice& user_key,
-                 const Slice& blob_index_slice,
-                 FilePrefetchBuffer* prefetch_buffer, PinnableSlice* value,
-                 uint64_t* bytes_read) const;
-
-  // Retrieves a blob using a blob reference and saves it in *value,
-  // assuming the corresponding blob file is part of this Version.
-  Status GetBlob(const ReadOptions& read_options, const Slice& user_key,
-                 const BlobIndex& blob_index,
-                 FilePrefetchBuffer* prefetch_buffer, PinnableSlice* value,
-                 uint64_t* bytes_read) const;
-
-  using BlobReadRequest =
-      std::pair<BlobIndex, std::reference_wrapper<const KeyContext>>;
-  using BlobReadRequests = std::vector<BlobReadRequest>;
-  void MultiGetBlob(const ReadOptions& read_options, MultiGetRange& range,
-                    std::unordered_map<uint64_t, BlobReadRequests>& blob_rqs);
+                ReadCallback* callback = nullptr, bool* is_blob = nullptr);
 
   // Loads some stats information from files. Call without mutex held. It needs
   // to be called before applying the version to the version set.
@@ -802,13 +742,14 @@ class Version {
 
   ColumnFamilyData* cfd() const { return cfd_; }
 
-  // Return the next Version in the linked list.
-  Version* Next() const { return next_; }
+  // Return the next Version in the linked list. Used for debug only
+  Version* TEST_Next() const {
+    return next_;
+  }
 
   int TEST_refs() const { return refs_; }
 
   VersionStorageInfo* storage_info() { return &storage_info_; }
-  const VersionStorageInfo* storage_info() const { return &storage_info_; }
 
   VersionSet* version_set() { return vset_; }
 
@@ -824,8 +765,6 @@ class Version {
 
  private:
   Env* env_;
-  SystemClock* clock_;
-
   friend class ReactiveVersionSet;
   friend class VersionSet;
   friend class VersionEditHandler;
@@ -837,6 +776,13 @@ class Version {
   const Comparator* user_comparator() const {
     return storage_info_.user_comparator_;
   }
+
+  // Interprets *value as a blob reference, and (assuming the corresponding
+  // blob file is part of this Version) retrieves the blob and saves it in
+  // *value, replacing the blob reference.
+  // REQUIRES: *value stores an encoded blob reference
+  Status GetBlob(const ReadOptions& read_options, const Slice& user_key,
+                 PinnableSlice* value) const;
 
   // Returns true if the filter blocks in the specified level will not be
   // checked during read operations. In certain cases (trivial move or preload),
@@ -852,6 +798,11 @@ class Version {
   // Update the accumulated stats associated with the current version.
   // This accumulated stats will be used in compaction.
   void UpdateAccumulatedStats(bool update_stats);
+
+  // Sort all files for this version based on their file size and
+  // record results in files_by_compaction_pri_. The largest files are listed
+  // first.
+  void UpdateFilesByCompactionPri();
 
   ColumnFamilyData* cfd_;  // ColumnFamilyData to which this Version belongs
   Logger* info_log_;
@@ -934,7 +885,6 @@ class BaseReferencedVersionBuilder;
 
 class AtomicGroupReadBuffer {
  public:
-  AtomicGroupReadBuffer() = default;
   Status AddEdit(VersionEdit* edit);
   void Clear();
   bool IsFull() const;
@@ -960,8 +910,7 @@ class VersionSet {
              WriteBufferManager* write_buffer_manager,
              WriteController* write_controller,
              BlockCacheTracer* const block_cache_tracer,
-             const std::shared_ptr<IOTracer>& io_tracer,
-             const std::string& db_session_id);
+             const std::shared_ptr<IOTracer>& io_tracer);
   // No copying allowed
   VersionSet(const VersionSet&) = delete;
   void operator=(const VersionSet&) = delete;
@@ -1039,7 +988,6 @@ class VersionSet {
                                        FileSystem* fs,
                                        std::string* manifest_filename,
                                        uint64_t* manifest_file_number);
-  void WakeUpWaitingManifestWriters();
 
   // Recover the last saved descriptor from persistent storage.
   // If read_only == true, Recover() will not complain if some column families
@@ -1088,8 +1036,6 @@ class VersionSet {
 
 #endif  // ROCKSDB_LITE
 
-  const std::string& DbSessionId() const { return db_session_id_; }
-
   // Return the current manifest file number
   uint64_t manifest_file_number() const { return manifest_file_number_; }
 
@@ -1101,8 +1047,8 @@ class VersionSet {
 
   uint64_t current_next_file_number() const { return next_file_number_.load(); }
 
-  uint64_t min_log_number_to_keep() const {
-    return min_log_number_to_keep_.load();
+  uint64_t min_log_number_to_keep_2pc() const {
+    return min_log_number_to_keep_2pc_.load();
   }
 
   // Allocate and return a new file number
@@ -1160,7 +1106,7 @@ class VersionSet {
   // Mark the specified log number as deleted
   // REQUIRED: this is only called during single-threaded recovery or repair, or
   // from ::LogAndApply where the global mutex is held.
-  void MarkMinLogNumberToKeep(uint64_t number);
+  void MarkMinLogNumberToKeep2PC(uint64_t number);
 
   // Return the log file number for the log file that is currently
   // being compacted, or zero if there is no such log file.
@@ -1169,54 +1115,17 @@ class VersionSet {
   // Returns the minimum log number which still has data not flushed to any SST
   // file.
   // In non-2PC mode, all the log numbers smaller than this number can be safely
-  // deleted, although we still use `min_log_number_to_keep_` to determine when
-  // to delete a WAL file.
+  // deleted.
   uint64_t MinLogNumberWithUnflushedData() const {
     return PreComputeMinLogNumberWithUnflushedData(nullptr);
-  }
-
-  // Returns the minimum log number which still has data not flushed to any SST
-  // file.
-  // Empty column families' log number is considered to be
-  // new_log_number_for_empty_cf.
-  uint64_t PreComputeMinLogNumberWithUnflushedData(
-      uint64_t new_log_number_for_empty_cf) const {
-    uint64_t min_log_num = port::kMaxUint64;
-    for (auto cfd : *column_family_set_) {
-      // It's safe to ignore dropped column families here:
-      // cfd->IsDropped() becomes true after the drop is persisted in MANIFEST.
-      uint64_t num =
-          cfd->IsEmpty() ? new_log_number_for_empty_cf : cfd->GetLogNumber();
-      if (min_log_num > num && !cfd->IsDropped()) {
-        min_log_num = num;
-      }
-    }
-    return min_log_num;
   }
   // Returns the minimum log number which still has data not flushed to any SST
   // file, except data from `cfd_to_skip`.
   uint64_t PreComputeMinLogNumberWithUnflushedData(
       const ColumnFamilyData* cfd_to_skip) const {
-    uint64_t min_log_num = port::kMaxUint64;
+    uint64_t min_log_num = std::numeric_limits<uint64_t>::max();
     for (auto cfd : *column_family_set_) {
       if (cfd == cfd_to_skip) {
-        continue;
-      }
-      // It's safe to ignore dropped column families here:
-      // cfd->IsDropped() becomes true after the drop is persisted in MANIFEST.
-      if (min_log_num > cfd->GetLogNumber() && !cfd->IsDropped()) {
-        min_log_num = cfd->GetLogNumber();
-      }
-    }
-    return min_log_num;
-  }
-  // Returns the minimum log number which still has data not flushed to any SST
-  // file, except data from `cfds_to_skip`.
-  uint64_t PreComputeMinLogNumberWithUnflushedData(
-      const std::unordered_set<const ColumnFamilyData*>& cfds_to_skip) const {
-    uint64_t min_log_num = port::kMaxUint64;
-    for (auto cfd : *column_family_set_) {
-      if (cfds_to_skip.count(cfd)) {
         continue;
       }
       // It's safe to ignore dropped column families here:
@@ -1252,6 +1161,12 @@ class VersionSet {
   // Return the size of the current manifest file
   uint64_t manifest_file_size() const { return manifest_file_size_; }
 
+  // verify that the files that we started with for a compaction
+  // still exist in the current version and in the same original level.
+  // This ensures that a concurrent compaction did not erroneously
+  // pick the same files to compact.
+  bool VerifyCompactionFileConsistency(Compaction* c);
+
   Status GetMetadataForFile(uint64_t number, int* filelevel,
                             FileMetaData** metadata, ColumnFamilyData** cfd);
 
@@ -1272,10 +1187,6 @@ class VersionSet {
                         uint64_t min_pending_output);
 
   ColumnFamilySet* GetColumnFamilySet() { return column_family_set_.get(); }
-  RefedColumnFamilySet GetRefedColumnFamilySet() {
-    return RefedColumnFamilySet(GetColumnFamilySet());
-  }
-
   const FileOptions& file_options() { return file_options_; }
   void ChangeFileOptions(const MutableDBOptions& new_options) {
     file_options_.writable_file_max_buffer_size =
@@ -1287,8 +1198,6 @@ class VersionSet {
   static uint64_t GetNumLiveVersions(Version* dummy_versions);
 
   static uint64_t GetTotalSstFilesSize(Version* dummy_versions);
-
-  static uint64_t GetTotalBlobFileSize(Version* dummy_versions);
 
   // Get the IO Status returned by written Manifest.
   const IOStatus& io_status() const { return io_status_; }
@@ -1345,11 +1254,6 @@ class VersionSet {
 
   struct MutableCFState {
     uint64_t log_number;
-    std::string full_history_ts_low;
-
-    explicit MutableCFState() = default;
-    explicit MutableCFState(uint64_t _log_number, std::string ts_low)
-        : log_number(_log_number), full_history_ts_low(std::move(ts_low)) {}
   };
 
   // Save current contents to *log
@@ -1362,6 +1266,29 @@ class VersionSet {
   ColumnFamilyData* CreateColumnFamily(const ColumnFamilyOptions& cf_options,
                                        const VersionEdit* edit);
 
+  Status ReadAndRecover(
+      log::Reader& reader, AtomicGroupReadBuffer* read_buffer,
+      const std::unordered_map<std::string, ColumnFamilyOptions>&
+          name_to_options,
+      std::unordered_map<int, std::string>& column_families_not_found,
+      std::unordered_map<
+          uint32_t, std::unique_ptr<BaseReferencedVersionBuilder>>& builders,
+      Status* log_read_status, VersionEditParams* version_edit,
+      std::string* db_id = nullptr);
+
+  // REQUIRES db mutex
+  Status ApplyOneVersionEditToBuilder(
+      VersionEdit& edit,
+      const std::unordered_map<std::string, ColumnFamilyOptions>& name_to_opts,
+      std::unordered_map<int, std::string>& column_families_not_found,
+      std::unordered_map<
+          uint32_t, std::unique_ptr<BaseReferencedVersionBuilder>>& builders,
+      VersionEditParams* version_edit);
+
+  Status ExtractInfoFromVersionEdit(ColumnFamilyData* cfd,
+                                    const VersionEdit& from_edit,
+                                    VersionEditParams* version_edit_params);
+
   Status VerifyFileMetadata(const std::string& fpath,
                             const FileMetaData& meta) const;
 
@@ -1372,25 +1299,21 @@ class VersionSet {
   Cache* table_cache_;
   Env* const env_;
   FileSystemPtr const fs_;
-  SystemClock* const clock_;
   const std::string dbname_;
   std::string db_id_;
   const ImmutableDBOptions* const db_options_;
   std::atomic<uint64_t> next_file_number_;
-  // Any WAL number smaller than this should be ignored during recovery,
-  // and is qualified for being deleted.
-  std::atomic<uint64_t> min_log_number_to_keep_ = {0};
+  // Any log number equal or lower than this should be ignored during recovery,
+  // and is qualified for being deleted in 2PC mode. In non-2PC mode, this
+  // number is ignored.
+  std::atomic<uint64_t> min_log_number_to_keep_2pc_ = {0};
   uint64_t manifest_file_number_;
   uint64_t options_file_number_;
-  uint64_t options_file_size_;
   uint64_t pending_manifest_file_number_;
   // The last seq visible to reads. It normally indicates the last sequence in
   // the memtable but when using two write queues it could also indicate the
   // last sequence in the WAL visible to reads.
   std::atomic<uint64_t> last_sequence_;
-  // The last sequence number of data committed to the descriptor (manifest
-  // file).
-  SequenceNumber descriptor_last_sequence_ = 0;
   // The last seq that is already allocated. It is applicable only when we have
   // two write queues. In that case seq might or might not have appreated in
   // memtable but it is expected to appear in the WAL.
@@ -1430,8 +1353,6 @@ class VersionSet {
 
   std::shared_ptr<IOTracer> io_tracer_;
 
-  std::string db_session_id_;
-
  private:
   // REQUIRES db mutex at beginning. may release and re-acquire db mutex
   Status ProcessManifestWrites(std::deque<ManifestWriter>& writers,
@@ -1439,11 +1360,9 @@ class VersionSet {
                                bool new_descriptor_log,
                                const ColumnFamilyOptions* new_cf_options);
 
-  void LogAndApplyCFHelper(VersionEdit* edit,
-                           SequenceNumber* max_last_sequence);
+  void LogAndApplyCFHelper(VersionEdit* edit);
   Status LogAndApplyHelper(ColumnFamilyData* cfd, VersionBuilder* b,
-                           VersionEdit* edit, SequenceNumber* max_last_sequence,
-                           InstrumentedMutex* mu);
+                           VersionEdit* edit, InstrumentedMutex* mu);
 };
 
 // ReactiveVersionSet represents a collection of versions of the column
@@ -1464,20 +1383,23 @@ class ReactiveVersionSet : public VersionSet {
   Status ReadAndApply(
       InstrumentedMutex* mu,
       std::unique_ptr<log::FragmentBufferedReader>* manifest_reader,
-      Status* manifest_read_status,
       std::unordered_set<ColumnFamilyData*>* cfds_changed);
 
   Status Recover(const std::vector<ColumnFamilyDescriptor>& column_families,
                  std::unique_ptr<log::FragmentBufferedReader>* manifest_reader,
                  std::unique_ptr<log::Reader::Reporter>* manifest_reporter,
                  std::unique_ptr<Status>* manifest_reader_status);
-#ifndef NDEBUG
-  uint64_t TEST_read_edits_in_atomic_group() const;
-#endif  //! NDEBUG
 
-  std::vector<VersionEdit>& replay_buffer();
+  uint64_t TEST_read_edits_in_atomic_group() const {
+    return read_buffer_.TEST_read_edits_in_atomic_group();
+  }
+  std::vector<VersionEdit>& replay_buffer() {
+    return read_buffer_.replay_buffer();
+  }
 
  protected:
+  using VersionSet::ApplyOneVersionEditToBuilder;
+
   // REQUIRES db mutex
   Status ApplyOneVersionEditToBuilder(
       VersionEdit& edit, std::unordered_set<ColumnFamilyData*>* cfds_changed,
@@ -1488,7 +1410,11 @@ class ReactiveVersionSet : public VersionSet {
       std::unique_ptr<log::FragmentBufferedReader>* manifest_reader);
 
  private:
-  std::unique_ptr<ManifestTailer> manifest_tailer_;
+  VersionBuilderMap active_version_builders_;
+  AtomicGroupReadBuffer read_buffer_;
+  // Number of version edits to skip by ReadAndApply at the beginning of a new
+  // MANIFEST created by primary.
+  int number_of_edits_to_skip_;
 
   using VersionSet::LogAndApply;
   using VersionSet::Recover;

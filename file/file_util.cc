@@ -112,18 +112,27 @@ Status DeleteDBFile(const ImmutableDBOptions* db_options,
 #endif
 }
 
+bool IsWalDirSameAsDBPath(const ImmutableDBOptions* db_options) {
+  bool same = false;
+  assert(!db_options->db_paths.empty());
+  Status s = db_options->env->AreFilesSame(db_options->wal_dir,
+                                           db_options->db_paths[0].path, &same);
+  if (s.IsNotSupported()) {
+    same = db_options->wal_dir == db_options->db_paths[0].path;
+  }
+  return same;
+}
+
 // requested_checksum_func_name brings the function name of the checksum
-// generator in checksum_factory. Empty string is permitted, in which case the
-// name of the generator created by the factory is unchecked. When
-// `requested_checksum_func_name` is non-empty, however, the created generator's
-// name must match it, otherwise an `InvalidArgument` error is returned.
+// generator in checksum_factory. Checksum factories may use or ignore
+// requested_checksum_func_name.
 IOStatus GenerateOneFileChecksum(
     FileSystem* fs, const std::string& file_path,
     FileChecksumGenFactory* checksum_factory,
     const std::string& requested_checksum_func_name, std::string* file_checksum,
     std::string* file_checksum_func_name,
     size_t verify_checksums_readahead_size, bool allow_mmap_reads,
-    std::shared_ptr<IOTracer>& io_tracer, RateLimiter* rate_limiter) {
+    std::shared_ptr<IOTracer>& io_tracer) {
   if (checksum_factory == nullptr) {
     return IOStatus::InvalidArgument("Checksum factory is invalid");
   }
@@ -142,21 +151,13 @@ IOStatus GenerateOneFileChecksum(
         requested_checksum_func_name +
         " from checksum factory: " + checksum_factory->Name();
     return IOStatus::InvalidArgument(msg);
-  } else {
-    // For backward compatibility and use in file ingestion clients where there
-    // is no stored checksum function name, `requested_checksum_func_name` can
-    // be empty. If we give the requested checksum function name, we expect it
-    // is the same name of the checksum generator.
-    if (!requested_checksum_func_name.empty() &&
-        checksum_generator->Name() != requested_checksum_func_name) {
-      std::string msg = "Expected file checksum generator named '" +
-                        requested_checksum_func_name +
-                        "', while the factory created one "
-                        "named '" +
-                        checksum_generator->Name() + "'";
-      return IOStatus::InvalidArgument(msg);
-    }
   }
+
+  // For backward compatable, requested_checksum_func_name can be empty.
+  // If we give the requested checksum function name, we expect it is the
+  // same name of the checksum generator.
+  assert(!checksum_generator || requested_checksum_func_name.empty() ||
+         requested_checksum_func_name == checksum_generator->Name());
 
   uint64_t size;
   IOStatus io_s;
@@ -172,8 +173,7 @@ IOStatus GenerateOneFileChecksum(
       return io_s;
     }
     reader.reset(new RandomAccessFileReader(std::move(r_file), file_path,
-                                            nullptr /*Env*/, io_tracer, nullptr,
-                                            0, nullptr, rate_limiter));
+                                            nullptr /*Env*/, io_tracer));
   }
 
   // Found that 256 KB readahead size provides the best performance, based on
@@ -183,9 +183,9 @@ IOStatus GenerateOneFileChecksum(
                               ? verify_checksums_readahead_size
                               : default_max_read_ahead_size;
 
-  FilePrefetchBuffer prefetch_buffer(readahead_size /* readahead_size */,
-                                     readahead_size /* max_readahead_size */,
-                                     !allow_mmap_reads /* enable */);
+  FilePrefetchBuffer prefetch_buffer(
+      reader.get(), readahead_size /* readadhead_size */,
+      readahead_size /* max_readahead_size */, !allow_mmap_reads /* enable */);
 
   Slice slice;
   uint64_t offset = 0;
@@ -193,9 +193,8 @@ IOStatus GenerateOneFileChecksum(
   while (size > 0) {
     size_t bytes_to_read =
         static_cast<size_t>(std::min(uint64_t{readahead_size}, size));
-    if (!prefetch_buffer.TryReadFromCache(
-            opts, reader.get(), offset, bytes_to_read, &slice,
-            nullptr /* status */, false /* for_compaction */)) {
+    if (!prefetch_buffer.TryReadFromCache(opts, offset, bytes_to_read, &slice,
+                                          false)) {
       return IOStatus::Corruption("file read failed");
     }
     if (slice.size() == 0) {
@@ -220,6 +219,9 @@ Status DestroyDir(Env* env, const std::string& dir) {
   s = env->GetChildren(dir, &files_in_dir);
   if (s.ok()) {
     for (auto& file_in_dir : files_in_dir) {
+      if (file_in_dir == "." || file_in_dir == "..") {
+        continue;
+      }
       std::string path = dir + "/" + file_in_dir;
       bool is_dir = false;
       s = env->IsDirectory(path, &is_dir);

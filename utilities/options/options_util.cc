@@ -7,6 +7,7 @@
 
 #include "rocksdb/utilities/options_util.h"
 
+#include "env/composite_env_wrapper.h"
 #include "file/filename.h"
 #include "options/options_parser.h"
 #include "rocksdb/convenience.h"
@@ -33,8 +34,8 @@ Status LoadOptionsFromFile(const ConfigOptions& config_options,
                            std::vector<ColumnFamilyDescriptor>* cf_descs,
                            std::shared_ptr<Cache>* cache) {
   RocksDBOptionsParser parser;
-  const auto& fs = config_options.env->GetFileSystem();
-  Status s = parser.Parse(config_options, file_name, fs.get());
+  LegacyFileSystemWrapper fs(config_options.env);
+  Status s = parser.Parse(config_options, file_name, &fs);
   if (!s.ok()) {
     return s;
   }
@@ -121,7 +122,7 @@ Status CheckOptionsCompatibility(
     const std::string& dbpath, Env* env, const DBOptions& db_options,
     const std::vector<ColumnFamilyDescriptor>& cf_descs,
     bool ignore_unknown_options) {
-  ConfigOptions config_options(db_options);
+  ConfigOptions config_options;
   config_options.sanity_level = ConfigOptions::kSanityLevelLooselyCompatible;
   config_options.ignore_unknown_options = ignore_unknown_options;
   config_options.input_strings_escaped = true;
@@ -148,11 +149,12 @@ Status CheckOptionsCompatibility(
     cf_opts.push_back(cf_desc.options);
   }
 
-  const auto& fs = config_options.env->GetFileSystem();
+  LegacyFileSystemWrapper fs(config_options.env);
 
   return RocksDBOptionsParser::VerifyRocksDBOptionsFromFile(
+
       config_options, db_options, cf_names, cf_opts,
-      dbpath + "/" + options_file_name, fs.get());
+      dbpath + "/" + options_file_name, &fs);
 }
 
 }  // namespace ROCKSDB_NAMESPACE

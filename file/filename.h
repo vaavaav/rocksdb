@@ -27,13 +27,12 @@ namespace ROCKSDB_NAMESPACE {
 
 class Env;
 class Directory;
-class SystemClock;
 class WritableFileWriter;
 
 #ifdef OS_WIN
-constexpr char kFilePathSeparator = '\\';
+const char kFilePathSeparator = '\\';
 #else
-constexpr char kFilePathSeparator = '/';
+const char kFilePathSeparator = '/';
 #endif
 
 // Return the name of the log file with the specified number
@@ -49,6 +48,8 @@ extern std::string BlobFileName(const std::string& bdirname, uint64_t number);
 
 extern std::string BlobFileName(const std::string& dbname,
                                 const std::string& blob_dir, uint64_t number);
+
+static const std::string ARCHIVAL_DIR = "archive";
 
 extern std::string ArchivalDirectory(const std::string& dbname);
 
@@ -87,10 +88,6 @@ extern void FormatFileNumber(uint64_t number, uint32_t path_id, char* out_buf,
 extern std::string DescriptorFileName(const std::string& dbname,
                                       uint64_t number);
 
-extern std::string DescriptorFileName(uint64_t number);
-
-extern const std::string kCurrentFileName;  // = "CURRENT"
-
 // Return the name of the current file.  This file contains the name
 // of the current manifest file.  The result will be prefixed with
 // "dbname".
@@ -124,14 +121,13 @@ extern std::string OldInfoLogFileName(const std::string& dbname, uint64_t ts,
                                       const std::string& db_path = "",
                                       const std::string& log_dir = "");
 
-extern const std::string kOptionsFileNamePrefix;  // = "OPTIONS-"
-extern const std::string kTempFileNameSuffix;     // = "dbtmp"
+static const std::string kOptionsFileNamePrefix = "OPTIONS-";
+static const std::string kTempFileNameSuffix = "dbtmp";
 
 // Return a options file name given the "dbname" and file number.
 // Format:  OPTIONS-[number].dbtmp
 extern std::string OptionsFileName(const std::string& dbname,
                                    uint64_t file_num);
-extern std::string OptionsFileName(uint64_t file_num);
 
 // Return a temp options file name given the "dbname" and file number.
 // Format:  OPTIONS-[number]
@@ -170,15 +166,14 @@ extern Status SetIdentityFile(Env* env, const std::string& dbname,
                               const std::string& db_id = {});
 
 // Sync manifest file `file`.
-extern IOStatus SyncManifest(const ImmutableDBOptions* db_options,
+extern IOStatus SyncManifest(Env* env, const ImmutableDBOptions* db_options,
                              WritableFileWriter* file);
 
 // Return list of file names of info logs in `file_names`.
 // The list only contains file name. The parent directory name is stored
 // in `parent_dir`.
 // `db_log_dir` should be the one as in options.db_log_dir
-extern Status GetInfoLogFiles(const std::shared_ptr<FileSystem>& fs,
-                              const std::string& db_log_dir,
+extern Status GetInfoLogFiles(Env* env, const std::string& db_log_dir,
                               const std::string& dbname,
                               std::string* parent_dir,
                               std::vector<std::string>* file_names);

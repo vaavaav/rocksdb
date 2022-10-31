@@ -112,10 +112,11 @@ class TestConfigurable : public Configurable {
       : name_(name), pointer_(nullptr) {
     prefix_ = "test." + name + ".";
     if ((mode & TestConfigMode::kSimpleMode) != 0) {
-      RegisterOptions(name_, &options_, map);
+      ConfigurableHelper::RegisterOptions(*this, name_, &options_, map);
     }
     if ((mode & TestConfigMode::kEnumMode) != 0) {
-      RegisterOptions(name_ + "Enum", &options_, &enum_option_info);
+      ConfigurableHelper::RegisterOptions(*this, name_ + "Enum", &options_,
+                                          &enum_option_info);
     }
   }
 

@@ -6,11 +6,9 @@
 #ifndef ROCKSDB_LITE
 
 #include "utilities/transactions/write_unprepared_txn.h"
-
 #include "db/db_impl/db_impl.h"
 #include "util/cast_util.h"
 #include "utilities/transactions/write_unprepared_txn_db.h"
-#include "utilities/write_batch_with_index/write_batch_with_index_internal.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -554,7 +552,7 @@ Status WriteUnpreparedTxn::CommitInternal() {
     // When not writing to memtable, we can still cache the latest write batch.
     // The cached batch will be written to memtable in WriteRecoverableState
     // during FlushMemTable
-    WriteBatchInternal::SetAsLatestPersistentState(working_batch);
+    WriteBatchInternal::SetAsLastestPersistentState(working_batch);
   }
 
   const bool includes_data = !empty && !for_recovery;
@@ -821,11 +819,7 @@ void WriteUnpreparedTxn::Clear() {
   unflushed_save_points_.reset(nullptr);
   recovered_txn_ = false;
   largest_validated_seq_ = 0;
-  for (auto& it : active_iterators_) {
-    auto bdit = static_cast<BaseDeltaIterator*>(it);
-    bdit->Invalidate(Status::InvalidArgument(
-        "Cannot use iterator after transaction has finished"));
-  }
+  assert(active_iterators_.empty());
   active_iterators_.clear();
   untracked_keys_.clear();
   TransactionBaseImpl::Clear();
@@ -969,7 +963,6 @@ Status WriteUnpreparedTxn::Get(const ReadOptions& options,
              wupt_db_->ValidateSnapshot(snap_seq, backed_by_snapshot))) {
     return res;
   } else {
-    res.PermitUncheckedError();
     wupt_db_->WPRecordTick(TXN_GET_TRY_AGAIN);
     return Status::TryAgain();
   }
@@ -1026,10 +1019,9 @@ Status WriteUnpreparedTxn::ValidateSnapshot(ColumnFamilyHandle* column_family,
 
   WriteUnpreparedTxnReadCallback snap_checker(
       wupt_db_, snap_seq, min_uncommitted, unprep_seqs_, kBackedByDBSnapshot);
-  // TODO(yanqin): Support user-defined timestamp.
-  return TransactionUtil::CheckKeyForConflicts(
-      db_impl_, cfh, key.ToString(), snap_seq, /*ts=*/nullptr,
-      false /* cache_only */, &snap_checker, min_uncommitted);
+  return TransactionUtil::CheckKeyForConflicts(db_impl_, cfh, key.ToString(),
+                                               snap_seq, false /* cache_only */,
+                                               &snap_checker, min_uncommitted);
 }
 
 const std::map<SequenceNumber, size_t>&

@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "file/line_file_reader.h"
+#include "file/read_write_util.h"
 #include "file/writable_file_writer.h"
 #include "options/cf_options.h"
 #include "options/db_options.h"
@@ -262,17 +262,22 @@ Status RocksDBOptionsParser::Parse(const ConfigOptions& config_options_in,
   if (!s.ok()) {
     return s;
   }
-  LineFileReader lf_reader(std::move(seq_file), file_name,
-                           config_options.file_readahead_size);
+  SequentialFileReader sf_reader(std::move(seq_file), file_name,
+                                 config_options.file_readahead_size);
 
   OptionSection section = kOptionSectionUnknown;
   std::string title;
   std::string argument;
   std::unordered_map<std::string, std::string> opt_map;
+  std::istringstream iss;
   std::string line;
+  bool has_data = true;
   // we only support single-lined statement.
-  while (lf_reader.ReadLine(&line)) {
-    int line_num = static_cast<int>(lf_reader.GetLineNumber());
+  for (int line_num = 1; ReadOneLine(&iss, &sf_reader, &line, &has_data, &s);
+       ++line_num) {
+    if (!s.ok()) {
+      return s;
+    }
     line = TrimAndRemoveComment(line);
     if (line.empty()) {
       continue;
@@ -307,10 +312,6 @@ Status RocksDBOptionsParser::Parse(const ConfigOptions& config_options_in,
       }
       opt_map.insert({name, value});
     }
-  }
-  s = lf_reader.GetStatus();
-  if (!s.ok()) {
-    return s;
   }
 
   s = EndSection(config_options, section, title, argument, opt_map);
@@ -553,12 +554,6 @@ Status RocksDBOptionsParser::VerifyRocksDBOptionsFromFile(
   ConfigOptions config_options = config_options_in;
   config_options.invoke_prepare_options =
       false;  // No need to do a prepare for verify
-  if (config_options.sanity_level < ConfigOptions::kSanityLevelExactMatch) {
-    // If we are not doing an exact comparison, we should ignore
-    // unsupported options, as they may cause the Parse to fail
-    // (if the ObjectRegistry is not initialized)
-    config_options.ignore_unsupported_options = true;
-  }
   Status s = parser.Parse(config_options, file_name, fs);
   if (!s.ok()) {
     return s;
@@ -628,9 +623,9 @@ Status RocksDBOptionsParser::VerifyRocksDBOptionsFromFile(
 Status RocksDBOptionsParser::VerifyDBOptions(
     const ConfigOptions& config_options, const DBOptions& base_opt,
     const DBOptions& file_opt,
-    const std::unordered_map<std::string, std::string>* opt_map) {
-  auto base_config = DBOptionsAsConfigurable(base_opt, opt_map);
-  auto file_config = DBOptionsAsConfigurable(file_opt, opt_map);
+    const std::unordered_map<std::string, std::string>* /*opt_map*/) {
+  auto base_config = DBOptionsAsConfigurable(base_opt);
+  auto file_config = DBOptionsAsConfigurable(file_opt);
   std::string mismatch;
   if (!base_config->AreEquivalent(config_options, file_config.get(),
                                   &mismatch)) {

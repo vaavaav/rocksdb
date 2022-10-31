@@ -126,24 +126,10 @@ struct DecodeKeyV4 {
   }
 };
 
-struct DecodeEntryV4 {
-  inline const char* operator()(const char* p, const char* limit,
-                                uint32_t* shared, uint32_t* non_shared,
-                                uint32_t* value_length) {
-    assert(value_length);
+void DataBlockIter::NextImpl() { ParseNextDataKey<DecodeEntry>(); }
 
-    *value_length = 0;
-    return DecodeKeyV4()(p, limit, shared, non_shared);
-  }
-};
-void DataBlockIter::NextImpl() {
-  bool is_shared = false;
-  ParseNextDataKey(&is_shared);
-}
-
-void MetaBlockIter::NextImpl() {
-  bool is_shared = false;
-  ParseNextKey<CheckAndDecodeEntry>(&is_shared);
+void DataBlockIter::NextOrReportImpl() {
+  ParseNextDataKey<CheckAndDecodeEntry>();
 }
 
 void IndexBlockIter::NextImpl() { ParseNextIndexKey(); }
@@ -164,27 +150,6 @@ void IndexBlockIter::PrevImpl() {
   SeekToRestartPoint(restart_index_);
   // Loop until end of current entry hits the start of original entry
   while (ParseNextIndexKey() && NextEntryOffset() < original) {
-  }
-}
-
-void MetaBlockIter::PrevImpl() {
-  assert(Valid());
-  // Scan backwards to a restart point before current_
-  const uint32_t original = current_;
-  while (GetRestartPoint(restart_index_) >= original) {
-    if (restart_index_ == 0) {
-      // No more entries
-      current_ = restarts_;
-      restart_index_ = num_restarts_;
-      return;
-    }
-    restart_index_--;
-  }
-  SeekToRestartPoint(restart_index_);
-  bool is_shared = false;
-  // Loop until end of current entry hits the start of original entry
-  while (ParseNextKey<CheckAndDecodeEntry>(&is_shared) &&
-         NextEntryOffset() < original) {
   }
 }
 
@@ -247,8 +212,7 @@ void DataBlockIter::PrevImpl() {
   SeekToRestartPoint(restart_index_);
 
   do {
-    bool is_shared = false;
-    if (!ParseNextDataKey(&is_shared)) {
+    if (!ParseNextDataKey<DecodeEntry>()) {
       break;
     }
     Slice current_key = raw_key_.GetKey();
@@ -271,22 +235,6 @@ void DataBlockIter::PrevImpl() {
 }
 
 void DataBlockIter::SeekImpl(const Slice& target) {
-  Slice seek_key = target;
-  PERF_TIMER_GUARD(block_seek_nanos);
-  if (data_ == nullptr) {  // Not init yet
-    return;
-  }
-  uint32_t index = 0;
-  bool skip_linear_scan = false;
-  bool ok = BinarySeek<DecodeKey>(seek_key, &index, &skip_linear_scan);
-
-  if (!ok) {
-    return;
-  }
-  FindKeyAfterBinarySeek(seek_key, index, skip_linear_scan);
-}
-
-void MetaBlockIter::SeekImpl(const Slice& target) {
   Slice seek_key = target;
   PERF_TIMER_GUARD(block_seek_nanos);
   if (data_ == nullptr) {  // Not init yet
@@ -361,21 +309,23 @@ bool DataBlockIter::SeekForGetImpl(const Slice& target) {
   // check if the key is in the restart_interval
   assert(restart_index < num_restarts_);
   SeekToRestartPoint(restart_index);
-  current_ = GetRestartPoint(restart_index);
 
-  uint32_t limit = restarts_;
-  if (restart_index + 1 < num_restarts_) {
-    limit = GetRestartPoint(restart_index + 1);
+  const char* limit = nullptr;
+  if (restart_index_ + 1 < num_restarts_) {
+    limit = data_ + GetRestartPoint(restart_index_ + 1);
+  } else {
+    limit = data_ + restarts_;
   }
-  while (current_ < limit) {
-    bool shared;
+
+  while (true) {
     // Here we only linear seek the target key inside the restart interval.
     // If a key does not exist inside a restart interval, we avoid
-    // further searching the block content across restart interval boundary.
+    // further searching the block content accross restart interval boundary.
     //
-    // TODO(fwu): check the left and right boundary of the restart interval
+    // TODO(fwu): check the left and write boundary of the restart interval
     // to avoid linear seek a target key that is out of range.
-    if (!ParseNextDataKey(&shared) || CompareCurrentKey(target) >= 0) {
+    if (!ParseNextDataKey<DecodeEntry>(limit) ||
+        CompareCurrentKey(target) >= 0) {
       // we stop at the first potential matching user key.
       break;
     }
@@ -386,7 +336,7 @@ bool DataBlockIter::SeekForGetImpl(const Slice& target) {
     // 1) there is only one user_key match in the block (otherwise collsion).
     //    the matching user_key resides in the last restart interval, and it
     //    is the last key of the restart interval and of the block as well.
-    //    ParseNextKey() skiped it as its [ type | seqno ] is smaller.
+    //    ParseNextDataKey() skiped it as its [ type | seqno ] is smaller.
     //
     // 2) The seek_key is not found in the HashIndex Lookup(), i.e. kNoEntry,
     //    AND all existing user_keys in the restart interval are smaller than
@@ -482,46 +432,20 @@ void DataBlockIter::SeekForPrevImpl(const Slice& target) {
   }
 }
 
-void MetaBlockIter::SeekForPrevImpl(const Slice& target) {
-  PERF_TIMER_GUARD(block_seek_nanos);
-  Slice seek_key = target;
-  if (data_ == nullptr) {  // Not init yet
-    return;
-  }
-  uint32_t index = 0;
-  bool skip_linear_scan = false;
-  bool ok = BinarySeek<DecodeKey>(seek_key, &index, &skip_linear_scan);
-
-  if (!ok) {
-    return;
-  }
-  FindKeyAfterBinarySeek(seek_key, index, skip_linear_scan);
-
-  if (!Valid()) {
-    SeekToLastImpl();
-  } else {
-    while (Valid() && CompareCurrentKey(seek_key) > 0) {
-      PrevImpl();
-    }
-  }
-}
-
 void DataBlockIter::SeekToFirstImpl() {
   if (data_ == nullptr) {  // Not init yet
     return;
   }
   SeekToRestartPoint(0);
-  bool is_shared = false;
-  ParseNextDataKey(&is_shared);
+  ParseNextDataKey<DecodeEntry>();
 }
 
-void MetaBlockIter::SeekToFirstImpl() {
+void DataBlockIter::SeekToFirstOrReportImpl() {
   if (data_ == nullptr) {  // Not init yet
     return;
   }
   SeekToRestartPoint(0);
-  bool is_shared = false;
-  ParseNextKey<CheckAndDecodeEntry>(&is_shared);
+  ParseNextDataKey<CheckAndDecodeEntry>();
 }
 
 void IndexBlockIter::SeekToFirstImpl() {
@@ -538,20 +462,7 @@ void DataBlockIter::SeekToLastImpl() {
     return;
   }
   SeekToRestartPoint(num_restarts_ - 1);
-  bool is_shared = false;
-  while (ParseNextDataKey(&is_shared) && NextEntryOffset() < restarts_) {
-    // Keep skipping
-  }
-}
-
-void MetaBlockIter::SeekToLastImpl() {
-  if (data_ == nullptr) {  // Not init yet
-    return;
-  }
-  SeekToRestartPoint(num_restarts_ - 1);
-  bool is_shared = false;
-  while (ParseNextKey<CheckAndDecodeEntry>(&is_shared) &&
-         NextEntryOffset() < restarts_) {
+  while (ParseNextDataKey<DecodeEntry>() && NextEntryOffset() < restarts_) {
     // Keep skipping
   }
 }
@@ -576,12 +487,13 @@ void BlockIter<TValue>::CorruptionError() {
   value_.clear();
 }
 
-template <class TValue>
 template <typename DecodeEntryFunc>
-bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
+bool DataBlockIter::ParseNextDataKey(const char* limit) {
   current_ = NextEntryOffset();
   const char* p = data_ + current_;
-  const char* limit = data_ + restarts_;  // Restarts come right after data
+  if (!limit) {
+    limit = data_ + restarts_;  // Restarts come right after data
+  }
 
   if (p >= limit) {
     // No more entries to return.  Mark as invalid.
@@ -589,6 +501,7 @@ bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
     restart_index_ = num_restarts_;
     return false;
   }
+
   // Decode next entry
   uint32_t shared, non_shared, value_length;
   p = DecodeEntryFunc()(p, limit, &shared, &non_shared, &value_length);
@@ -597,15 +510,31 @@ bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
     return false;
   } else {
     if (shared == 0) {
-      *is_shared = false;
       // If this key doesn't share any bytes with prev key then we don't need
       // to decode it and can use its address in the block directly.
       raw_key_.SetKey(Slice(p, non_shared), false /* copy */);
     } else {
       // This key share `shared` bytes with prev key, we need to decode it
-      *is_shared = true;
       raw_key_.TrimAppend(shared, p, non_shared);
     }
+
+#ifndef NDEBUG
+    if (global_seqno_ != kDisableGlobalSequenceNumber) {
+      // If we are reading a file with a global sequence number we should
+      // expect that all encoded sequence numbers are zeros and any value
+      // type is kTypeValue, kTypeMerge, kTypeDeletion, or kTypeRangeDeletion.
+      uint64_t packed = ExtractInternalKeyFooter(raw_key_.GetKey());
+      SequenceNumber seqno;
+      ValueType value_type;
+      UnPackSequenceAndType(packed, &seqno, &value_type);
+      assert(value_type == ValueType::kTypeValue ||
+             value_type == ValueType::kTypeMerge ||
+             value_type == ValueType::kTypeDeletion ||
+             value_type == ValueType::kTypeRangeDeletion);
+      assert(seqno == 0);
+    }
+#endif  // NDEBUG
+
     value_ = Slice(p + non_shared, value_length);
     if (shared == 0) {
       while (restart_index_ + 1 < num_restarts_ &&
@@ -619,42 +548,50 @@ bool BlockIter<TValue>::ParseNextKey(bool* is_shared) {
   }
 }
 
-bool DataBlockIter::ParseNextDataKey(bool* is_shared) {
-  if (ParseNextKey<DecodeEntry>(is_shared)) {
-#ifndef NDEBUG
-    if (global_seqno_ != kDisableGlobalSequenceNumber) {
-      // If we are reading a file with a global sequence number we should
-      // expect that all encoded sequence numbers are zeros and any value
-      // type is kTypeValue, kTypeMerge, kTypeDeletion,
-      // kTypeDeletionWithTimestamp, or kTypeRangeDeletion.
-      uint64_t packed = ExtractInternalKeyFooter(raw_key_.GetKey());
-      SequenceNumber seqno;
-      ValueType value_type;
-      UnPackSequenceAndType(packed, &seqno, &value_type);
-      assert(value_type == ValueType::kTypeValue ||
-             value_type == ValueType::kTypeMerge ||
-             value_type == ValueType::kTypeDeletion ||
-             value_type == ValueType::kTypeDeletionWithTimestamp ||
-             value_type == ValueType::kTypeRangeDeletion);
-      assert(seqno == 0);
-    }
-#endif  // NDEBUG
-    return true;
-  } else {
+bool IndexBlockIter::ParseNextIndexKey() {
+  current_ = NextEntryOffset();
+  const char* p = data_ + current_;
+  const char* limit = data_ + restarts_;  // Restarts come right after data
+  if (p >= limit) {
+    // No more entries to return.  Mark as invalid.
+    current_ = restarts_;
+    restart_index_ = num_restarts_;
     return false;
   }
-}
 
-bool IndexBlockIter::ParseNextIndexKey() {
-  bool is_shared = false;
-  bool ok = (value_delta_encoded_) ? ParseNextKey<DecodeEntryV4>(&is_shared)
-                                   : ParseNextKey<DecodeEntry>(&is_shared);
-  if (ok) {
-    if (value_delta_encoded_ || global_seqno_state_ != nullptr) {
-      DecodeCurrentValue(is_shared);
+  // Decode next entry
+  uint32_t shared, non_shared, value_length;
+  if (value_delta_encoded_) {
+    p = DecodeKeyV4()(p, limit, &shared, &non_shared);
+    value_length = 0;
+  } else {
+    p = DecodeEntry()(p, limit, &shared, &non_shared, &value_length);
+  }
+  if (p == nullptr || raw_key_.Size() < shared) {
+    CorruptionError();
+    return false;
+  }
+  if (shared == 0) {
+    // If this key doesn't share any bytes with prev key then we don't need
+    // to decode it and can use its address in the block directly.
+    raw_key_.SetKey(Slice(p, non_shared), false /* copy */);
+  } else {
+    // This key share `shared` bytes with prev key, we need to decode it
+    raw_key_.TrimAppend(shared, p, non_shared);
+  }
+  value_ = Slice(p + non_shared, value_length);
+  if (shared == 0) {
+    while (restart_index_ + 1 < num_restarts_ &&
+           GetRestartPoint(restart_index_ + 1) < current_) {
+      ++restart_index_;
     }
   }
-  return ok;
+  // else we are in the middle of a restart interval and the restart_index_
+  // thus has not changed
+  if (value_delta_encoded_ || global_seqno_state_ != nullptr) {
+    DecodeCurrentValue(shared);
+  }
+  return true;
 }
 
 // The format:
@@ -665,15 +602,15 @@ bool IndexBlockIter::ParseNextIndexKey() {
 // where, k is key, v is value, and its encoding is in parenthesis.
 // The format of each key is (shared_size, non_shared_size, shared, non_shared)
 // The format of each value, i.e., block handle, is (offset, size) whenever the
-// is_shared is false, which included the first entry in each restart point.
+// shared_size is 0, which included the first entry in each restart point.
 // Otherwise the format is delta-size = block handle size - size of last block
 // handle.
-void IndexBlockIter::DecodeCurrentValue(bool is_shared) {
+void IndexBlockIter::DecodeCurrentValue(uint32_t shared) {
   Slice v(value_.data(), data_ + restarts_ - value_.data());
   // Delta encoding is used if `shared` != 0.
   Status decode_s __attribute__((__unused__)) = decoded_value_.DecodeFrom(
       &v, have_first_key_,
-      (value_delta_encoded_ && is_shared) ? &decoded_value_.handle : nullptr);
+      (value_delta_encoded_ && shared) ? &decoded_value_.handle : nullptr);
   assert(decode_s.ok());
   value_ = Slice(value_.data(), v.data() - value_.data());
 
@@ -1029,21 +966,6 @@ Block::Block(BlockContents&& contents, size_t read_amp_bytes_per_bit,
     read_amp_bitmap_.reset(new BlockReadAmpBitmap(
         restart_offset_, read_amp_bytes_per_bit, statistics));
   }
-}
-
-MetaBlockIter* Block::NewMetaIterator(bool block_contents_pinned) {
-  MetaBlockIter* iter = new MetaBlockIter();
-  if (size_ < 2 * sizeof(uint32_t)) {
-    iter->Invalidate(Status::Corruption("bad block contents"));
-    return iter;
-  } else if (num_restarts_ == 0) {
-    // Empty block.
-    iter->Invalidate(Status::OK());
-  } else {
-    iter->Initialize(data_, restart_offset_, num_restarts_,
-                     block_contents_pinned);
-  }
-  return iter;
 }
 
 DataBlockIter* Block::NewDataIterator(const Comparator* raw_ucmp,

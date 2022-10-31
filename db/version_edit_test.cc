@@ -8,11 +8,8 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/version_edit.h"
-
-#include "rocksdb/advanced_options.h"
 #include "test_util/sync_point.h"
 #include "test_util/testharness.h"
-#include "test_util/testutil.h"
 #include "util/coding.h"
 #include "util/string_util.h"
 
@@ -40,9 +37,8 @@ TEST_F(VersionEditTest, EncodeDecode) {
     edit.AddFile(3, kBig + 300 + i, kBig32Bit + 400 + i, 0,
                  InternalKey("foo", kBig + 500 + i, kTypeValue),
                  InternalKey("zoo", kBig + 600 + i, kTypeDeletion),
-                 kBig + 500 + i, kBig + 600 + i, false, Temperature::kUnknown,
-                 kInvalidBlobFileNumber, 888, 678, "234", "crc32c", "123",
-                 "345");
+                 kBig + 500 + i, kBig + 600 + i, false, kInvalidBlobFileNumber,
+                 888, 678, "234", "crc32c");
     edit.DeleteFile(4, kBig + 700 + i);
   }
 
@@ -59,27 +55,23 @@ TEST_F(VersionEditTest, EncodeDecodeNewFile4) {
   VersionEdit edit;
   edit.AddFile(3, 300, 3, 100, InternalKey("foo", kBig + 500, kTypeValue),
                InternalKey("zoo", kBig + 600, kTypeDeletion), kBig + 500,
-               kBig + 600, true, Temperature::kUnknown, kInvalidBlobFileNumber,
+               kBig + 600, true, kInvalidBlobFileNumber,
                kUnknownOldestAncesterTime, kUnknownFileCreationTime,
-               kUnknownFileChecksum, kUnknownFileChecksumFuncName, "123",
-               "234");
+               kUnknownFileChecksum, kUnknownFileChecksumFuncName);
   edit.AddFile(4, 301, 3, 100, InternalKey("foo", kBig + 501, kTypeValue),
                InternalKey("zoo", kBig + 601, kTypeDeletion), kBig + 501,
-               kBig + 601, false, Temperature::kUnknown, kInvalidBlobFileNumber,
+               kBig + 601, false, kInvalidBlobFileNumber,
                kUnknownOldestAncesterTime, kUnknownFileCreationTime,
-               kUnknownFileChecksum, kUnknownFileChecksumFuncName, "345",
-               "543");
+               kUnknownFileChecksum, kUnknownFileChecksumFuncName);
   edit.AddFile(5, 302, 0, 100, InternalKey("foo", kBig + 502, kTypeValue),
                InternalKey("zoo", kBig + 602, kTypeDeletion), kBig + 502,
-               kBig + 602, true, Temperature::kUnknown, kInvalidBlobFileNumber,
-               666, 888, kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-               "456", "567");
+               kBig + 602, true, kInvalidBlobFileNumber, 666, 888,
+               kUnknownFileChecksum, kUnknownFileChecksumFuncName);
   edit.AddFile(5, 303, 0, 100, InternalKey("foo", kBig + 503, kTypeBlobIndex),
                InternalKey("zoo", kBig + 603, kTypeBlobIndex), kBig + 503,
-               kBig + 603, true, Temperature::kUnknown, 1001,
-               kUnknownOldestAncesterTime, kUnknownFileCreationTime,
-               kUnknownFileChecksum, kUnknownFileChecksumFuncName, "678",
-               "789");
+               kBig + 603, true, 1001, kUnknownOldestAncesterTime,
+               kUnknownFileCreationTime, kUnknownFileChecksum,
+               kUnknownFileChecksumFuncName);
   ;
 
   edit.DeleteFile(4, 700);
@@ -111,14 +103,6 @@ TEST_F(VersionEditTest, EncodeDecodeNewFile4) {
   ASSERT_EQ(kInvalidBlobFileNumber,
             new_files[2].second.oldest_blob_file_number);
   ASSERT_EQ(1001, new_files[3].second.oldest_blob_file_number);
-  ASSERT_EQ("123", new_files[0].second.min_timestamp);
-  ASSERT_EQ("234", new_files[0].second.max_timestamp);
-  ASSERT_EQ("345", new_files[1].second.min_timestamp);
-  ASSERT_EQ("543", new_files[1].second.max_timestamp);
-  ASSERT_EQ("456", new_files[2].second.min_timestamp);
-  ASSERT_EQ("567", new_files[2].second.max_timestamp);
-  ASSERT_EQ("678", new_files[3].second.min_timestamp);
-  ASSERT_EQ("789", new_files[3].second.max_timestamp);
 }
 
 TEST_F(VersionEditTest, ForwardCompatibleNewFile4) {
@@ -126,15 +110,13 @@ TEST_F(VersionEditTest, ForwardCompatibleNewFile4) {
   VersionEdit edit;
   edit.AddFile(3, 300, 3, 100, InternalKey("foo", kBig + 500, kTypeValue),
                InternalKey("zoo", kBig + 600, kTypeDeletion), kBig + 500,
-               kBig + 600, true, Temperature::kUnknown, kInvalidBlobFileNumber,
+               kBig + 600, true, kInvalidBlobFileNumber,
                kUnknownOldestAncesterTime, kUnknownFileCreationTime,
-               kUnknownFileChecksum, kUnknownFileChecksumFuncName, "123",
-               "234");
+               kUnknownFileChecksum, kUnknownFileChecksumFuncName);
   edit.AddFile(4, 301, 3, 100, InternalKey("foo", kBig + 501, kTypeValue),
                InternalKey("zoo", kBig + 601, kTypeDeletion), kBig + 501,
-               kBig + 601, false, Temperature::kUnknown, kInvalidBlobFileNumber,
-               686, 868, "234", "crc32c", kDisableUserTimestamp,
-               kDisableUserTimestamp);
+               kBig + 601, false, kInvalidBlobFileNumber, 686, 868, "234",
+               "crc32c");
   edit.DeleteFile(4, 700);
 
   edit.SetComparatorName("foo");
@@ -173,10 +155,6 @@ TEST_F(VersionEditTest, ForwardCompatibleNewFile4) {
   ASSERT_EQ(3u, new_files[0].second.fd.GetPathId());
   ASSERT_EQ(3u, new_files[1].second.fd.GetPathId());
   ASSERT_EQ(1u, parsed.GetDeletedFiles().size());
-  ASSERT_EQ("123", new_files[0].second.min_timestamp);
-  ASSERT_EQ("234", new_files[0].second.max_timestamp);
-  ASSERT_EQ(kDisableUserTimestamp, new_files[1].second.min_timestamp);
-  ASSERT_EQ(kDisableUserTimestamp, new_files[1].second.max_timestamp);
 }
 
 TEST_F(VersionEditTest, NewFile4NotSupportedField) {
@@ -184,10 +162,9 @@ TEST_F(VersionEditTest, NewFile4NotSupportedField) {
   VersionEdit edit;
   edit.AddFile(3, 300, 3, 100, InternalKey("foo", kBig + 500, kTypeValue),
                InternalKey("zoo", kBig + 600, kTypeDeletion), kBig + 500,
-               kBig + 600, true, Temperature::kUnknown, kInvalidBlobFileNumber,
+               kBig + 600, true, kInvalidBlobFileNumber,
                kUnknownOldestAncesterTime, kUnknownFileCreationTime,
-               kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-               kDisableUserTimestamp, kDisableUserTimestamp);
+               kUnknownFileChecksum, kUnknownFileChecksumFuncName);
 
   edit.SetComparatorName("foo");
   edit.SetLogNumber(kBig + 100);
@@ -215,10 +192,9 @@ TEST_F(VersionEditTest, NewFile4NotSupportedField) {
 TEST_F(VersionEditTest, EncodeEmptyFile) {
   VersionEdit edit;
   edit.AddFile(0, 0, 0, 0, InternalKey(), InternalKey(), 0, 0, false,
-               Temperature::kUnknown, kInvalidBlobFileNumber,
-               kUnknownOldestAncesterTime, kUnknownFileCreationTime,
-               kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-               kDisableUserTimestamp, kDisableUserTimestamp);
+               kInvalidBlobFileNumber, kUnknownOldestAncesterTime,
+               kUnknownFileCreationTime, kUnknownFileChecksum,
+               kUnknownFileChecksumFuncName);
   std::string buffer;
   ASSERT_TRUE(!edit.EncodeTo(&buffer));
 }
@@ -346,22 +322,14 @@ TEST_F(VersionEditTest, AddWalEncodeDecode) {
   TestEncodeDecode(edit);
 }
 
-static std::string PrefixEncodedWalAdditionWithLength(
-    const std::string& encoded) {
-  std::string ret;
-  PutVarint32(&ret, Tag::kWalAddition2);
-  PutLengthPrefixedSlice(&ret, encoded);
-  return ret;
-}
-
 TEST_F(VersionEditTest, AddWalDecodeBadLogNumber) {
   std::string encoded;
+  PutVarint32(&encoded, Tag::kWalAddition);
 
   {
     // No log number.
-    std::string encoded_edit = PrefixEncodedWalAdditionWithLength(encoded);
     VersionEdit edit;
-    Status s = edit.DecodeFrom(encoded_edit);
+    Status s = edit.DecodeFrom(encoded);
     ASSERT_TRUE(s.IsCorruption());
     ASSERT_TRUE(s.ToString().find("Error decoding WAL log number") !=
                 std::string::npos)
@@ -375,10 +343,8 @@ TEST_F(VersionEditTest, AddWalDecodeBadLogNumber) {
     unsigned char* ptr = reinterpret_cast<unsigned char*>(&c);
     *ptr = 128;
     encoded.append(1, c);
-
-    std::string encoded_edit = PrefixEncodedWalAdditionWithLength(encoded);
     VersionEdit edit;
-    Status s = edit.DecodeFrom(encoded_edit);
+    Status s = edit.DecodeFrom(encoded);
     ASSERT_TRUE(s.IsCorruption());
     ASSERT_TRUE(s.ToString().find("Error decoding WAL log number") !=
                 std::string::npos)
@@ -390,14 +356,14 @@ TEST_F(VersionEditTest, AddWalDecodeBadTag) {
   constexpr WalNumber kLogNumber = 100;
   constexpr uint64_t kSizeInBytes = 100;
 
-  std::string encoded;
-  PutVarint64(&encoded, kLogNumber);
+  std::string encoded_without_tag;
+  PutVarint32(&encoded_without_tag, Tag::kWalAddition);
+  PutVarint64(&encoded_without_tag, kLogNumber);
 
   {
     // No tag.
-    std::string encoded_edit = PrefixEncodedWalAdditionWithLength(encoded);
     VersionEdit edit;
-    Status s = edit.DecodeFrom(encoded_edit);
+    Status s = edit.DecodeFrom(encoded_without_tag);
     ASSERT_TRUE(s.IsCorruption());
     ASSERT_TRUE(s.ToString().find("Error decoding tag") != std::string::npos)
         << s.ToString();
@@ -405,15 +371,12 @@ TEST_F(VersionEditTest, AddWalDecodeBadTag) {
 
   {
     // Only has size tag, no terminate tag.
-    std::string encoded_with_size = encoded;
+    std::string encoded_with_size = encoded_without_tag;
     PutVarint32(&encoded_with_size,
                 static_cast<uint32_t>(WalAdditionTag::kSyncedSize));
     PutVarint64(&encoded_with_size, kSizeInBytes);
-
-    std::string encoded_edit =
-        PrefixEncodedWalAdditionWithLength(encoded_with_size);
     VersionEdit edit;
-    Status s = edit.DecodeFrom(encoded_edit);
+    Status s = edit.DecodeFrom(encoded_with_size);
     ASSERT_TRUE(s.IsCorruption());
     ASSERT_TRUE(s.ToString().find("Error decoding tag") != std::string::npos)
         << s.ToString();
@@ -421,14 +384,11 @@ TEST_F(VersionEditTest, AddWalDecodeBadTag) {
 
   {
     // Only has terminate tag.
-    std::string encoded_with_terminate = encoded;
+    std::string encoded_with_terminate = encoded_without_tag;
     PutVarint32(&encoded_with_terminate,
                 static_cast<uint32_t>(WalAdditionTag::kTerminate));
-
-    std::string encoded_edit =
-        PrefixEncodedWalAdditionWithLength(encoded_with_terminate);
     VersionEdit edit;
-    ASSERT_OK(edit.DecodeFrom(encoded_edit));
+    ASSERT_OK(edit.DecodeFrom(encoded_with_terminate));
     auto& wal_addition = edit.GetWalAdditions()[0];
     ASSERT_EQ(wal_addition.GetLogNumber(), kLogNumber);
     ASSERT_FALSE(wal_addition.GetMetadata().HasSyncedSize());
@@ -439,15 +399,15 @@ TEST_F(VersionEditTest, AddWalDecodeNoSize) {
   constexpr WalNumber kLogNumber = 100;
 
   std::string encoded;
+  PutVarint32(&encoded, Tag::kWalAddition);
   PutVarint64(&encoded, kLogNumber);
   PutVarint32(&encoded, static_cast<uint32_t>(WalAdditionTag::kSyncedSize));
   // No real size after the size tag.
 
   {
     // Without terminate tag.
-    std::string encoded_edit = PrefixEncodedWalAdditionWithLength(encoded);
     VersionEdit edit;
-    Status s = edit.DecodeFrom(encoded_edit);
+    Status s = edit.DecodeFrom(encoded);
     ASSERT_TRUE(s.IsCorruption());
     ASSERT_TRUE(s.ToString().find("Error decoding WAL file size") !=
                 std::string::npos)
@@ -457,10 +417,8 @@ TEST_F(VersionEditTest, AddWalDecodeNoSize) {
   {
     // With terminate tag.
     PutVarint32(&encoded, static_cast<uint32_t>(WalAdditionTag::kTerminate));
-
-    std::string encoded_edit = PrefixEncodedWalAdditionWithLength(encoded);
     VersionEdit edit;
-    Status s = edit.DecodeFrom(encoded_edit);
+    Status s = edit.DecodeFrom(encoded);
     ASSERT_TRUE(s.IsCorruption());
     // The terminate tag is misunderstood as the size.
     ASSERT_TRUE(s.ToString().find("Error decoding tag") != std::string::npos)
@@ -545,70 +503,6 @@ TEST_F(VersionEditTest, DeleteWalDebug) {
   }
   expected_json += ", \"ColumnFamily\": 0}";
   ASSERT_EQ(edit.DebugJSON(4, true), expected_json);
-}
-
-TEST_F(VersionEditTest, FullHistoryTsLow) {
-  VersionEdit edit;
-  ASSERT_FALSE(edit.HasFullHistoryTsLow());
-  std::string ts = test::EncodeInt(0);
-  edit.SetFullHistoryTsLow(ts);
-  TestEncodeDecode(edit);
-}
-
-// Tests that if RocksDB is downgraded, the new types of VersionEdits
-// that have a tag larger than kTagSafeIgnoreMask can be safely ignored.
-TEST_F(VersionEditTest, IgnorableTags) {
-  SyncPoint::GetInstance()->SetCallBack(
-      "VersionEdit::EncodeTo:IgnoreIgnorableTags", [&](void* arg) {
-        bool* ignore = static_cast<bool*>(arg);
-        *ignore = true;
-      });
-  SyncPoint::GetInstance()->EnableProcessing();
-
-  constexpr uint64_t kPrevLogNumber = 100;
-  constexpr uint64_t kLogNumber = 200;
-  constexpr uint64_t kNextFileNumber = 300;
-  constexpr uint64_t kColumnFamilyId = 400;
-
-  VersionEdit edit;
-  // Add some ignorable entries.
-  for (int i = 0; i < 2; i++) {
-    edit.AddWal(i + 1, WalMetadata(i + 2));
-  }
-  edit.SetDBId("db_id");
-  // Add unignorable entries.
-  edit.SetPrevLogNumber(kPrevLogNumber);
-  edit.SetLogNumber(kLogNumber);
-  // Add more ignorable entries.
-  edit.DeleteWalsBefore(100);
-  // Add unignorable entry.
-  edit.SetNextFile(kNextFileNumber);
-  // Add more ignorable entries.
-  edit.SetFullHistoryTsLow("ts");
-  // Add unignorable entry.
-  edit.SetColumnFamily(kColumnFamilyId);
-
-  std::string encoded;
-  ASSERT_TRUE(edit.EncodeTo(&encoded));
-
-  VersionEdit decoded;
-  ASSERT_OK(decoded.DecodeFrom(encoded));
-
-  // Check that all ignorable entries are ignored.
-  ASSERT_FALSE(decoded.HasDbId());
-  ASSERT_FALSE(decoded.HasFullHistoryTsLow());
-  ASSERT_FALSE(decoded.IsWalAddition());
-  ASSERT_FALSE(decoded.IsWalDeletion());
-  ASSERT_TRUE(decoded.GetWalAdditions().empty());
-  ASSERT_TRUE(decoded.GetWalDeletion().IsEmpty());
-
-  // Check that unignorable entries are still present.
-  ASSERT_EQ(edit.GetPrevLogNumber(), kPrevLogNumber);
-  ASSERT_EQ(edit.GetLogNumber(), kLogNumber);
-  ASSERT_EQ(edit.GetNextFile(), kNextFileNumber);
-  ASSERT_EQ(edit.GetColumnFamily(), kColumnFamilyId);
-
-  SyncPoint::GetInstance()->DisableProcessing();
 }
 
 }  // namespace ROCKSDB_NAMESPACE

@@ -44,7 +44,7 @@ class PessimisticTransaction : public TransactionBaseImpl {
   PessimisticTransaction(const PessimisticTransaction&) = delete;
   void operator=(const PessimisticTransaction&) = delete;
 
-  ~PessimisticTransaction() override;
+  virtual ~PessimisticTransaction();
 
   void Reinitialize(TransactionDB* txn_db, const WriteOptions& write_options,
                     const TransactionOptions& txn_options);
@@ -115,10 +115,6 @@ class PessimisticTransaction : public TransactionBaseImpl {
   bool IsDeadlockDetect() const override { return deadlock_detect_; }
 
   int64_t GetDeadlockDetectDepth() const { return deadlock_detect_depth_; }
-
-  virtual Status GetRangeLock(ColumnFamilyHandle* column_family,
-                              const Endpoint& start_key,
-                              const Endpoint& end_key) override;
 
  protected:
   // Refer to
@@ -213,7 +209,7 @@ class WriteCommittedTxn : public PessimisticTransaction {
   WriteCommittedTxn(const WriteCommittedTxn&) = delete;
   void operator=(const WriteCommittedTxn&) = delete;
 
-  ~WriteCommittedTxn() override {}
+  virtual ~WriteCommittedTxn() {}
 
  private:
   Status PrepareInternal() override;

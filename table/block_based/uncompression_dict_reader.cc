@@ -5,8 +5,6 @@
 //
 
 #include "table/block_based/uncompression_dict_reader.h"
-
-#include "logging/logging.h"
 #include "monitoring/perf_context_imp.h"
 #include "table/block_based/block_based_table_reader.h"
 #include "util/compression.h"
@@ -62,11 +60,11 @@ Status UncompressionDictReader::ReadUncompressionDictionary(
       prefetch_buffer, read_options, rep->compression_dict_handle,
       UncompressionDict::GetEmptyDict(), uncompression_dict,
       BlockType::kCompressionDictionary, get_context, lookup_context,
-      /* for_compaction */ false, use_cache, /* wait_for_cache */ true);
+      /* for_compaction */ false, use_cache);
 
   if (!s.ok()) {
     ROCKS_LOG_WARN(
-        rep->ioptions.logger,
+        rep->ioptions.info_log,
         "Encountered error while reading data from compression dictionary "
         "block %s",
         s.ToString().c_str());

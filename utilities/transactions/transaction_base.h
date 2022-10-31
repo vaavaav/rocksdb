@@ -31,7 +31,7 @@ class TransactionBaseImpl : public Transaction {
   TransactionBaseImpl(DB* db, const WriteOptions& write_options,
                       const LockTrackerFactory& lock_tracker_factory);
 
-  ~TransactionBaseImpl() override;
+  virtual ~TransactionBaseImpl();
 
   // Remove pending operations queued in this transaction.
   virtual void Clear();
@@ -202,8 +202,7 @@ class TransactionBaseImpl : public Transaction {
   }
 
   const Snapshot* GetSnapshot() const override {
-    // will return nullptr when there is no snapshot
-    return snapshot_.get();
+    return snapshot_ ? snapshot_.get() : nullptr;
   }
 
   virtual void SetSnapshot() override;
@@ -250,8 +249,6 @@ class TransactionBaseImpl : public Transaction {
   virtual Status RebuildFromWriteBatch(WriteBatch* src_batch) override;
 
   WriteBatch* GetCommitTimeWriteBatch() override;
-
-  LockTracker& GetTrackedLocks() { return *tracked_locks_; }
 
  protected:
   // Add a key to the list of tracked keys.

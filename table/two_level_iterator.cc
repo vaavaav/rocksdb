@@ -201,10 +201,6 @@ void TwoLevelIndexIterator::InitDataBlock() {
           state_->NewSecondaryIterator(handle);
       data_block_handle_ = handle;
       SetSecondLevelIterator(iter);
-      if (iter == nullptr) {
-        status_ = Status::Corruption("Missing block for partition " +
-                                     handle.ToString());
-      }
     }
   }
 }

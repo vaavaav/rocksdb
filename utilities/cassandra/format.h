@@ -142,7 +142,7 @@ private:
   std::chrono::seconds Ttl() const;
 };
 
-using Columns = std::vector<std::shared_ptr<ColumnBase>>;
+typedef std::vector<std::shared_ptr<ColumnBase>> Columns;
 
 class RowValue {
 public:

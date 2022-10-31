@@ -25,7 +25,6 @@ enum class OptionType {
   kInt32T,
   kInt64T,
   kUInt,
-  kUInt8T,
   kUInt32T,
   kUInt64T,
   kSizeT,
@@ -33,9 +32,16 @@ enum class OptionType {
   kDouble,
   kCompactionStyle,
   kCompactionPri,
+  kSliceTransform,
   kCompressionType,
+  kComparator,
+  kCompactionFilter,
+  kCompactionFilterFactory,
   kCompactionStopStyle,
+  kMergeOperator,
+  kMemTableRepFactory,
   kFilterPolicy,
+  kFlushBlockPolicyFactory,
   kChecksumType,
   kEncodingType,
   kEnv,
@@ -44,7 +50,6 @@ enum class OptionType {
   kVector,
   kConfigurable,
   kCustomizable,
-  kEncodedString,
   kUnknown,
 };
 
@@ -171,7 +176,7 @@ bool VectorsAreEqual(const ConfigOptions& config_options,
 // @param addr  Pointer to the object
 using ParseFunc = std::function<Status(
     const ConfigOptions& /*opts*/, const std::string& /*name*/,
-    const std::string& /*value*/, void* /*addr*/)>;
+    const std::string& /*value*/, char* /*addr*/)>;
 
 // Function for converting an option "addr" into its string representation.
 // On success, Status::OK is returned and value is the serialized form.
@@ -182,7 +187,7 @@ using ParseFunc = std::function<Status(
 // @param value The result of the serialization.
 using SerializeFunc = std::function<Status(
     const ConfigOptions& /*opts*/, const std::string& /*name*/,
-    const void* /*addr*/, std::string* /*value*/)>;
+    const char* /*addr*/, std::string* /*value*/)>;
 
 // Function for comparing two option values
 // If they are not equal, updates "mismatch" with the name of the bad option
@@ -194,7 +199,7 @@ using SerializeFunc = std::function<Status(
 // first differs
 using EqualsFunc = std::function<bool(
     const ConfigOptions& /*opts*/, const std::string& /*name*/,
-    const void* /*addr1*/, const void* /*addr2*/, std::string* mismatch)>;
+    const char* /*addr1*/, const char* /*addr2*/, std::string* mismatch)>;
 
 // A struct for storing constant option information such as option name,
 // option type, and offset.
@@ -250,27 +255,27 @@ class OptionTypeInfo {
   // - Create a static map of string values to the corresponding enum value
   // - Call this method passing the static map in as a parameter.
   // Note that it is not necessary to add a new OptionType or make any
-  // other changes -- the returned object handles parsing, serialization, and
+  // other changes -- the returned object handles parsing, serialiation, and
   // comparisons.
   //
   // @param offset The offset in the option object for this enum
   // @param map The string to enum mapping for this enum
   template <typename T>
   static OptionTypeInfo Enum(
-      int offset, const std::unordered_map<std::string, T>* const map,
-      OptionTypeFlags flags = OptionTypeFlags::kNone) {
+      int offset, const std::unordered_map<std::string, T>* const map) {
     return OptionTypeInfo(
-        offset, OptionType::kEnum, OptionVerificationType::kNormal, flags,
+        offset, OptionType::kEnum, OptionVerificationType::kNormal,
+        OptionTypeFlags::kNone,
         // Uses the map argument to convert the input string into
         // its corresponding enum value.  If value is found in the map,
         // addr is updated to the corresponding map entry.
         // @return OK if the value is found in the map
         // @return InvalidArgument if the value is not found in the map
         [map](const ConfigOptions&, const std::string& name,
-              const std::string& value, void* addr) {
+              const std::string& value, char* addr) {
           if (map == nullptr) {
             return Status::NotSupported("No enum mapping ", name);
-          } else if (ParseEnum<T>(*map, value, static_cast<T*>(addr))) {
+          } else if (ParseEnum<T>(*map, value, reinterpret_cast<T*>(addr))) {
             return Status::OK();
           } else {
             return Status::InvalidArgument("No mapping for enum ", name);
@@ -281,11 +286,11 @@ class OptionTypeInfo {
         // value is updated to the corresponding string value in the map.
         // @return OK if the enum is found in the map
         // @return InvalidArgument if the enum is not found in the map
-        [map](const ConfigOptions&, const std::string& name, const void* addr,
+        [map](const ConfigOptions&, const std::string& name, const char* addr,
               std::string* value) {
           if (map == nullptr) {
             return Status::NotSupported("No enum mapping ", name);
-          } else if (SerializeEnum<T>(*map, (*static_cast<const T*>(addr)),
+          } else if (SerializeEnum<T>(*map, (*reinterpret_cast<const T*>(addr)),
                                       value)) {
             return Status::OK();
           } else {
@@ -294,10 +299,10 @@ class OptionTypeInfo {
         },
         // Casts addr1 and addr2 to the enum type and returns true if
         // they are equal, false otherwise.
-        [](const ConfigOptions&, const std::string&, const void* addr1,
-           const void* addr2, std::string*) {
-          return (*static_cast<const T*>(addr1) ==
-                  *static_cast<const T*>(addr2));
+        [](const ConfigOptions&, const std::string&, const char* addr1,
+           const char* addr2, std::string*) {
+          return (*reinterpret_cast<const T*>(addr1) ==
+                  *reinterpret_cast<const T*>(addr2));
         });
   }  // End OptionTypeInfo::Enum
 
@@ -332,20 +337,20 @@ class OptionTypeInfo {
         // Parses the struct and updates the fields at addr
         [struct_name, struct_map](const ConfigOptions& opts,
                                   const std::string& name,
-                                  const std::string& value, void* addr) {
+                                  const std::string& value, char* addr) {
           return ParseStruct(opts, struct_name, struct_map, name, value, addr);
         },
         // Serializes the struct options into value
         [struct_name, struct_map](const ConfigOptions& opts,
-                                  const std::string& name, const void* addr,
+                                  const std::string& name, const char* addr,
                                   std::string* value) {
           return SerializeStruct(opts, struct_name, struct_map, name, addr,
                                  value);
         },
         // Compares the struct fields of addr1 and addr2 for equality
         [struct_name, struct_map](const ConfigOptions& opts,
-                                  const std::string& name, const void* addr1,
-                                  const void* addr2, std::string* mismatch) {
+                                  const std::string& name, const char* addr1,
+                                  const char* addr2, std::string* mismatch) {
           return StructsAreEqual(opts, struct_name, struct_map, name, addr1,
                                  addr2, mismatch);
         });
@@ -358,14 +363,14 @@ class OptionTypeInfo {
     return OptionTypeInfo(
         offset, OptionType::kStruct, verification, flags, parse_func,
         [struct_name, struct_map](const ConfigOptions& opts,
-                                  const std::string& name, const void* addr,
+                                  const std::string& name, const char* addr,
                                   std::string* value) {
           return SerializeStruct(opts, struct_name, struct_map, name, addr,
                                  value);
         },
         [struct_name, struct_map](const ConfigOptions& opts,
-                                  const std::string& name, const void* addr1,
-                                  const void* addr2, std::string* mismatch) {
+                                  const std::string& name, const char* addr1,
+                                  const char* addr2, std::string* mismatch) {
           return StructsAreEqual(opts, struct_name, struct_map, name, addr1,
                                  addr2, mismatch);
         });
@@ -381,23 +386,23 @@ class OptionTypeInfo {
         _offset, OptionType::kVector, _verification, _flags,
         [elem_info, separator](const ConfigOptions& opts,
                                const std::string& name,
-                               const std::string& value, void* addr) {
-          auto result = static_cast<std::vector<T>*>(addr);
+                               const std::string& value, char* addr) {
+          auto result = reinterpret_cast<std::vector<T>*>(addr);
           return ParseVector<T>(opts, elem_info, separator, name, value,
                                 result);
         },
         [elem_info, separator](const ConfigOptions& opts,
-                               const std::string& name, const void* addr,
+                               const std::string& name, const char* addr,
                                std::string* value) {
-          const auto& vec = *(static_cast<const std::vector<T>*>(addr));
+          const auto& vec = *(reinterpret_cast<const std::vector<T>*>(addr));
           return SerializeVector<T>(opts, elem_info, separator, name, vec,
                                     value);
         },
         [elem_info](const ConfigOptions& opts, const std::string& name,
-                    const void* addr1, const void* addr2,
+                    const char* addr1, const char* addr2,
                     std::string* mismatch) {
-          const auto& vec1 = *(static_cast<const std::vector<T>*>(addr1));
-          const auto& vec2 = *(static_cast<const std::vector<T>*>(addr2));
+          const auto& vec1 = *(reinterpret_cast<const std::vector<T>*>(addr1));
+          const auto& vec2 = *(reinterpret_cast<const std::vector<T>*>(addr2));
           return VectorsAreEqual<T>(opts, elem_info, name, vec1, vec2,
                                     mismatch);
         });
@@ -428,15 +433,10 @@ class OptionTypeInfo {
     return OptionTypeInfo(
         offset, OptionType::kCustomizable, ovt,
         flags | OptionTypeFlags::kShared,
-        [](const ConfigOptions& opts, const std::string& name,
-           const std::string& value, void* addr) {
-          auto* shared = static_cast<std::shared_ptr<T>*>(addr);
-          if (name == kIdPropName() && value.empty()) {
-            shared->reset();
-            return Status::OK();
-          } else {
-            return T::CreateFromString(opts, value, shared);
-          }
+        [](const ConfigOptions& opts, const std::string&,
+           const std::string& value, char* addr) {
+          auto* shared = reinterpret_cast<std::shared_ptr<T>*>(addr);
+          return T::CreateFromString(opts, value, shared);
         },
         serialize_func, equals_func);
   }
@@ -466,15 +466,10 @@ class OptionTypeInfo {
     return OptionTypeInfo(
         offset, OptionType::kCustomizable, ovt,
         flags | OptionTypeFlags::kUnique,
-        [](const ConfigOptions& opts, const std::string& name,
-           const std::string& value, void* addr) {
-          auto* unique = static_cast<std::unique_ptr<T>*>(addr);
-          if (name == kIdPropName() && value.empty()) {
-            unique->reset();
-            return Status::OK();
-          } else {
-            return T::CreateFromString(opts, value, unique);
-          }
+        [](const ConfigOptions& opts, const std::string&,
+           const std::string& value, char* addr) {
+          auto* unique = reinterpret_cast<std::unique_ptr<T>*>(addr);
+          return T::CreateFromString(opts, value, unique);
         },
         serialize_func, equals_func);
   }
@@ -502,28 +497,16 @@ class OptionTypeInfo {
     return OptionTypeInfo(
         offset, OptionType::kCustomizable, ovt,
         flags | OptionTypeFlags::kRawPointer,
-        [](const ConfigOptions& opts, const std::string& name,
-           const std::string& value, void* addr) {
-          auto** pointer = static_cast<T**>(addr);
-          if (name == kIdPropName() && value.empty()) {
-            *pointer = nullptr;
-            return Status::OK();
-          } else {
-            return T::CreateFromString(opts, value, pointer);
-          }
+        [](const ConfigOptions& opts, const std::string&,
+           const std::string& value, char* addr) {
+          auto** pointer = reinterpret_cast<T**>(addr);
+          return T::CreateFromString(opts, value, pointer);
         },
         serialize_func, equals_func);
   }
 
   bool IsEnabled(OptionTypeFlags otf) const { return (flags_ & otf) == otf; }
 
-  bool IsEditable(const ConfigOptions& opts) const {
-    if (opts.mutable_options_only) {
-      return IsMutable();
-    } else {
-      return true;
-    }
-  }
   bool IsMutable() const { return IsEnabled(OptionTypeFlags::kMutable); }
 
   bool IsDeprecated() const {
@@ -574,7 +557,6 @@ class OptionTypeInfo {
   // or if the flags specify allow null.
   bool CanBeNull() const {
     return (IsEnabled(OptionTypeFlags::kAllowNull) ||
-            IsEnabled(OptionVerificationType::kByNameAllowNull) ||
             IsEnabled(OptionVerificationType::kByNameAllowFromNull));
   }
 
@@ -606,20 +588,20 @@ class OptionTypeInfo {
     if (base_addr == nullptr) {
       return nullptr;
     }
-    const void* opt_addr = static_cast<const char*>(base_addr) + offset_;
+    const auto opt_addr = reinterpret_cast<const char*>(base_addr) + offset_;
     if (IsUniquePtr()) {
       const std::unique_ptr<T>* ptr =
-          static_cast<const std::unique_ptr<T>*>(opt_addr);
+          reinterpret_cast<const std::unique_ptr<T>*>(opt_addr);
       return ptr->get();
     } else if (IsSharedPtr()) {
       const std::shared_ptr<T>* ptr =
-          static_cast<const std::shared_ptr<T>*>(opt_addr);
+          reinterpret_cast<const std::shared_ptr<T>*>(opt_addr);
       return ptr->get();
     } else if (IsRawPtr()) {
-      const T* const* ptr = static_cast<const T* const*>(opt_addr);
+      const T* const* ptr = reinterpret_cast<const T* const*>(opt_addr);
       return *ptr;
     } else {
-      return static_cast<const T*>(opt_addr);
+      return reinterpret_cast<const T*>(opt_addr);
     }
   }
 
@@ -630,18 +612,18 @@ class OptionTypeInfo {
     if (base_addr == nullptr) {
       return nullptr;
     }
-    void* opt_addr = static_cast<char*>(base_addr) + offset_;
+    auto opt_addr = reinterpret_cast<char*>(base_addr) + offset_;
     if (IsUniquePtr()) {
-      std::unique_ptr<T>* ptr = static_cast<std::unique_ptr<T>*>(opt_addr);
+      std::unique_ptr<T>* ptr = reinterpret_cast<std::unique_ptr<T>*>(opt_addr);
       return ptr->get();
     } else if (IsSharedPtr()) {
-      std::shared_ptr<T>* ptr = static_cast<std::shared_ptr<T>*>(opt_addr);
+      std::shared_ptr<T>* ptr = reinterpret_cast<std::shared_ptr<T>*>(opt_addr);
       return ptr->get();
     } else if (IsRawPtr()) {
-      T** ptr = static_cast<T**>(opt_addr);
+      T** ptr = reinterpret_cast<T**>(opt_addr);
       return *ptr;
     } else {
-      return static_cast<T*>(opt_addr);
+      return reinterpret_cast<T*>(opt_addr);
     }
   }
 
@@ -675,37 +657,6 @@ class OptionTypeInfo {
                       const std::string& opt_name, const void* const this_ptr,
                       const std::string& that_value) const;
 
-  // Parses the input opts_map according to the type_map for the opt_addr
-  // For each name-value pair in opts_map, find the corresponding name in
-  // type_map If the name is found:
-  //    - set the corresponding value in opt_addr, returning the status on
-  //    failure;
-  // If the name is not found:
-  //    - If unused is specified, add the name-value to unused and continue
-  //    - If ingore_unknown_options is false, return NotFound
-  // Returns OK if all options were either:
-  //    - Successfully set
-  //    - options were not found and ignore_unknown_options=true
-  //    - options were not found and unused was specified
-  // Note that this method is much less sophisticated than the comparable
-  // Configurable::Configure methods.  For example, on error, there is no
-  // attempt to return opt_addr to the initial state.  Additionally, there
-  // is no effort to initialize (Configurable::PrepareOptions) the object
-  // on success.  This method should typically only be used for simpler,
-  // standalone structures and not those that contain shared and embedded
-  // objects.
-  static Status ParseType(
-      const ConfigOptions& config_options, const std::string& opts_str,
-      const std::unordered_map<std::string, OptionTypeInfo>& type_map,
-      void* opt_addr,
-      std::unordered_map<std::string, std::string>* unused = nullptr);
-  static Status ParseType(
-      const ConfigOptions& config_options,
-      const std::unordered_map<std::string, std::string>& opts_map,
-      const std::unordered_map<std::string, OptionTypeInfo>& type_map,
-      void* opt_addr,
-      std::unordered_map<std::string, std::string>* unused = nullptr);
-
   // Parses the input value according to the map for the struct at opt_addr
   // struct_name is the name of the struct option as registered
   // opt_name is the name of the option being evaluated.  This may
@@ -714,15 +665,7 @@ class OptionTypeInfo {
   static Status ParseStruct(
       const ConfigOptions& config_options, const std::string& struct_name,
       const std::unordered_map<std::string, OptionTypeInfo>* map,
-      const std::string& opt_name, const std::string& value, void* opt_addr);
-
-  // Serializes the values from opt_addr using the rules in type_map.
-  // Returns the serialized form in result.
-  // Returns OK on success or non-OK if some option could not be serialized.
-  static Status SerializeType(
-      const ConfigOptions& config_options,
-      const std::unordered_map<std::string, OptionTypeInfo>& type_map,
-      const void* opt_addr, std::string* value);
+      const std::string& opt_name, const std::string& value, char* opt_addr);
 
   // Serializes the input addr according to the map for the struct to value.
   // struct_name is the name of the struct option as registered
@@ -731,16 +674,7 @@ class OptionTypeInfo {
   static Status SerializeStruct(
       const ConfigOptions& config_options, const std::string& struct_name,
       const std::unordered_map<std::string, OptionTypeInfo>* map,
-      const std::string& opt_name, const void* opt_addr, std::string* value);
-
-  // Compares the values in this_addr and that_addr using the rules in type_map.
-  // If the values are equal, returns true
-  // If the values are not equal, returns false and sets mismatch to the name
-  // of the first value that did not match.
-  static bool TypesAreEqual(
-      const ConfigOptions& config_options,
-      const std::unordered_map<std::string, OptionTypeInfo>& map,
-      const void* this_addr, const void* that_addr, std::string* mismatch);
+      const std::string& opt_name, const char* opt_addr, std::string* value);
 
   // Compares the input offsets according to the map for the struct and returns
   // true if they are equivalent, false otherwise.
@@ -750,8 +684,8 @@ class OptionTypeInfo {
   static bool StructsAreEqual(
       const ConfigOptions& config_options, const std::string& struct_name,
       const std::unordered_map<std::string, OptionTypeInfo>* map,
-      const std::string& opt_name, const void* this_offset,
-      const void* that_offset, std::string* mismatch);
+      const std::string& opt_name, const char* this_offset,
+      const char* that_offset, std::string* mismatch);
 
   // Finds the entry for the opt_name in the opt_map, returning
   // nullptr if not found.
@@ -777,7 +711,7 @@ class OptionTypeInfo {
   // @param opts The string in which to find the next token
   // @param delimiter The delimiter between tokens
   // @param start     The position in opts to start looking for the token
-  // @param ed        Returns the end position in opts of the token
+  // @parem ed        Returns the end position in opts of the token
   // @param token     Returns the token
   // @returns OK if a token was found
   // @return InvalidArgument if the braces mismatch
@@ -786,9 +720,6 @@ class OptionTypeInfo {
   //        e.g. "{a=b}c=d;" -- missing delimiter before "c"
   static Status NextToken(const std::string& opts, char delimiter, size_t start,
                           size_t* end, std::string* token);
-
-  constexpr static const char* kIdPropName() { return "id"; }
-  constexpr static const char* kIdPropSuffix() { return ".id"; }
 
  private:
   int offset_;
@@ -844,7 +775,8 @@ Status ParseVector(const ConfigOptions& config_options,
     status = OptionTypeInfo::NextToken(value, separator, start, &end, &token);
     if (status.ok()) {
       T elem;
-      status = elem_info.Parse(copy, name, token, &elem);
+      status =
+          elem_info.Parse(copy, name, token, reinterpret_cast<char*>(&elem));
       if (status.ok()) {
         result->emplace_back(elem);
       } else if (config_options.ignore_unsupported_options &&
@@ -884,18 +816,18 @@ Status SerializeVector(const ConfigOptions& config_options,
   std::string result;
   ConfigOptions embedded = config_options;
   embedded.delimiter = ";";
-  int printed = 0;
-  for (const auto& elem : vec) {
+  for (size_t i = 0; i < vec.size(); ++i) {
     std::string elem_str;
-    Status s = elem_info.Serialize(embedded, name, &elem, &elem_str);
+    Status s = elem_info.Serialize(
+        embedded, name, reinterpret_cast<const char*>(&vec[i]), &elem_str);
     if (!s.ok()) {
       return s;
-    } else if (!elem_str.empty()) {
-      if (printed++ > 0) {
+    } else {
+      if (i > 0) {
         result += separator;
       }
       // If the element contains embedded separators, put it inside of brackets
-      if (elem_str.find(separator) != std::string::npos) {
+      if (result.find(separator) != std::string::npos) {
         result += "{" + elem_str + "}";
       } else {
         result += elem_str;
@@ -903,8 +835,6 @@ Status SerializeVector(const ConfigOptions& config_options,
     }
   }
   if (result.find("=") != std::string::npos) {
-    *value = "{" + result + "}";
-  } else if (printed > 1 && result.at(0) == '{') {
     *value = "{" + result + "}";
   } else {
     *value = result;
@@ -922,7 +852,7 @@ Status SerializeVector(const ConfigOptions& config_options,
 // @param vec1,vec2 The vectors to compare.
 // @param mismatch  If the vectors are not equivalent, mismatch will point to
 // the first
-//                  element of the comparison that did not match.
+//                  element of the comparison tht did not match.
 // @return true     If vec1 and vec2 are "equal", false otherwise
 template <typename T>
 bool VectorsAreEqual(const ConfigOptions& config_options,

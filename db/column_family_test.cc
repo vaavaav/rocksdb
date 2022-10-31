@@ -56,8 +56,16 @@ class ColumnFamilyTestBase : public testing::Test {
  public:
   explicit ColumnFamilyTestBase(uint32_t format) : rnd_(139), format_(format) {
     Env* base_env = Env::Default();
-    EXPECT_OK(
-        test::CreateEnvFromSystem(ConfigOptions(), &base_env, &env_guard_));
+#ifndef ROCKSDB_LITE
+    const char* test_env_uri = getenv("TEST_ENV_URI");
+    if (test_env_uri) {
+      Env* test_env = nullptr;
+      Status s = Env::LoadEnv(test_env_uri, &test_env, &env_guard_);
+      base_env = test_env;
+      EXPECT_OK(s);
+      EXPECT_NE(Env::Default(), base_env);
+    }
+#endif  // !ROCKSDB_LITE
     EXPECT_NE(nullptr, base_env);
     env_ = new EnvCounter(base_env);
     env_->skip_fsync_ = true;
@@ -65,7 +73,7 @@ class ColumnFamilyTestBase : public testing::Test {
     db_options_.create_if_missing = true;
     db_options_.fail_if_options_file_error = true;
     db_options_.env = env_;
-    EXPECT_OK(DestroyDB(dbname_, Options(db_options_, column_family_options_)));
+    DestroyDB(dbname_, Options(db_options_, column_family_options_));
   }
 
   ~ColumnFamilyTestBase() override {
@@ -179,8 +187,8 @@ class ColumnFamilyTestBase : public testing::Test {
     std::vector<ColumnFamilyDescriptor> column_families;
     names_.clear();
     for (size_t i = 0; i < cf.size(); ++i) {
-      column_families.emplace_back(
-          cf[i], options.size() == 0 ? column_family_options_ : options[i]);
+      column_families.push_back(ColumnFamilyDescriptor(
+          cf[i], options.size() == 0 ? column_family_options_ : options[i]));
       names_.push_back(cf[i]);
     }
     return DB::Open(db_options_, dbname_, column_families, &handles_, &db_);
@@ -191,8 +199,8 @@ class ColumnFamilyTestBase : public testing::Test {
     std::vector<ColumnFamilyDescriptor> column_families;
     names_.clear();
     for (size_t i = 0; i < cf.size(); ++i) {
-      column_families.emplace_back(
-          cf[i], options.size() == 0 ? column_family_options_ : options[i]);
+      column_families.push_back(ColumnFamilyDescriptor(
+          cf[i], options.size() == 0 ? column_family_options_ : options[i]));
       names_.push_back(cf[i]);
     }
     return DB::OpenForReadOnly(db_options_, dbname_, column_families, &handles_,
@@ -554,7 +562,7 @@ class ColumnFamilyTest
 INSTANTIATE_TEST_CASE_P(FormatDef, ColumnFamilyTest,
                         testing::Values(test::kDefaultFormatVersion));
 INSTANTIATE_TEST_CASE_P(FormatLatest, ColumnFamilyTest,
-                        testing::Values(kLatestFormatVersion));
+                        testing::Values(test::kLatestFormatVersion));
 
 TEST_P(ColumnFamilyTest, DontReuseColumnFamilyID) {
   for (int iter = 0; iter < 3; ++iter) {
@@ -645,8 +653,8 @@ TEST_P(FlushEmptyCFTestWithParam, FlushEmptyCFTest) {
   // after flushing file B is deleted. At the same time, the min log number of
   // default CF is not written to manifest. Log file A still remains.
   // Flushed to SST file Y.
-  ASSERT_OK(Flush(1));
-  ASSERT_OK(Flush(0));
+  Flush(1);
+  Flush(0);
   ASSERT_OK(Put(1, "bar", "v3"));  // seqID 4
   ASSERT_OK(Put(1, "foo", "v4"));  // seqID 5
   ASSERT_OK(db_->FlushWAL(/*sync=*/false));
@@ -700,15 +708,15 @@ TEST_P(FlushEmptyCFTestWithParam, FlushEmptyCFTest2) {
   // and is set to current. Both CFs' min log number is set to file C so after
   // flushing file B is deleted. Log file A still remains.
   // Flushed to SST file Y.
-  ASSERT_OK(Flush(1));
+  Flush(1);
   ASSERT_OK(Put(0, "bar", "v2"));  // seqID 4
   ASSERT_OK(Put(2, "bar", "v2"));  // seqID 5
   ASSERT_OK(Put(1, "bar", "v3"));  // seqID 6
   // Flushing all column families. This forces all CFs' min log to current. This
   // is written to the manifest file. Log file C is cleared.
-  ASSERT_OK(Flush(0));
-  ASSERT_OK(Flush(1));
-  ASSERT_OK(Flush(2));
+  Flush(0);
+  Flush(1);
+  Flush(2);
   // Write to log file D
   ASSERT_OK(Put(1, "bar", "v4"));  // seqID 7
   ASSERT_OK(Put(1, "bar", "v5"));  // seqID 8
@@ -746,8 +754,8 @@ INSTANTIATE_TEST_CASE_P(
                     std::make_tuple(test::kDefaultFormatVersion, false)));
 INSTANTIATE_TEST_CASE_P(
     FormatLatest, FlushEmptyCFTestWithParam,
-    testing::Values(std::make_tuple(kLatestFormatVersion, true),
-                    std::make_tuple(kLatestFormatVersion, false)));
+    testing::Values(std::make_tuple(test::kLatestFormatVersion, true),
+                    std::make_tuple(test::kLatestFormatVersion, false)));
 
 TEST_P(ColumnFamilyTest, AddDrop) {
   Open();
@@ -890,7 +898,9 @@ TEST_P(ColumnFamilyTest, IgnoreRecoveredLog) {
   std::vector<std::string> old_files;
   ASSERT_OK(env_->GetChildren(backup_logs, &old_files));
   for (auto& file : old_files) {
-    ASSERT_OK(env_->DeleteFile(backup_logs + "/" + file));
+    if (file != "." && file != "..") {
+      ASSERT_OK(env_->DeleteFile(backup_logs + "/" + file));
+    }
   }
 
   column_family_options_.merge_operator =
@@ -919,7 +929,9 @@ TEST_P(ColumnFamilyTest, IgnoreRecoveredLog) {
   std::vector<std::string> logs;
   ASSERT_OK(env_->GetChildren(db_options_.wal_dir, &logs));
   for (auto& log : logs) {
-    CopyFile(db_options_.wal_dir + "/" + log, backup_logs + "/" + log);
+    if (log != ".." && log != ".") {
+      CopyFile(db_options_.wal_dir + "/" + log, backup_logs + "/" + log);
+    }
   }
 
   // recover the DB
@@ -944,7 +956,9 @@ TEST_P(ColumnFamilyTest, IgnoreRecoveredLog) {
     if (iter == 0) {
       // copy the logs from backup back to wal dir
       for (auto& log : logs) {
-        CopyFile(backup_logs + "/" + log, db_options_.wal_dir + "/" + log);
+        if (log != ".." && log != ".") {
+          CopyFile(backup_logs + "/" + log, db_options_.wal_dir + "/" + log);
+        }
       }
     }
   }
@@ -971,7 +985,7 @@ TEST_P(ColumnFamilyTest, FlushTest) {
     for (int i = 0; i < 3; ++i) {
       uint64_t max_total_in_memory_state =
           MaxTotalInMemoryState();
-      ASSERT_OK(Flush(i));
+      Flush(i);
       AssertMaxTotalInMemoryState(max_total_in_memory_state);
     }
     ASSERT_OK(Put(1, "foofoo", "bar"));
@@ -1079,7 +1093,7 @@ TEST_P(ColumnFamilyTest, CrashAfterFlush) {
   ASSERT_OK(batch.Put(handles_[0], Slice("foo"), Slice("bar")));
   ASSERT_OK(batch.Put(handles_[1], Slice("foo"), Slice("bar")));
   ASSERT_OK(db_->Write(WriteOptions(), &batch));
-  ASSERT_OK(Flush(0));
+  Flush(0);
   fault_env->SetFilesystemActive(false);
 
   std::vector<std::string> names;
@@ -1089,7 +1103,7 @@ TEST_P(ColumnFamilyTest, CrashAfterFlush) {
     }
   }
   Close();
-  ASSERT_OK(fault_env->DropUnsyncedFileData());
+  fault_env->DropUnsyncedFileData();
   fault_env->ResetState();
   Open(names, {});
 
@@ -2222,7 +2236,7 @@ TEST_P(ColumnFamilyTest, FlushStaleColumnFamilies) {
   // files for column family [one], because it's empty
   AssertCountLiveFiles(4);
 
-  ASSERT_OK(Flush(0));
+  Flush(0);
   ASSERT_EQ(0, dbfull()->TEST_total_log_size());
   Close();
 }
@@ -2278,8 +2292,6 @@ TEST_P(ColumnFamilyTest, SanitizeOptions) {
               // not a multiple of 4k, round up 4k
               expected_arena_block_size += 4 * 1024;
             }
-            expected_arena_block_size =
-                std::min(size_t{1024 * 1024}, expected_arena_block_size);
             ASSERT_EQ(expected_arena_block_size, result.arena_block_size);
           }
         }
@@ -2975,8 +2987,7 @@ TEST_P(ColumnFamilyTest, FlushCloseWALFiles) {
   SpecialEnv env(Env::Default());
   db_options_.env = &env;
   db_options_.max_background_flushes = 1;
-  column_family_options_.memtable_factory.reset(
-      test::NewSpecialSkipListFactory(2));
+  column_family_options_.memtable_factory.reset(new SpecialSkipListFactory(2));
   Open();
   CreateColumnFamilies({"one"});
   ASSERT_OK(Put(1, "fodor", "mirko"));
@@ -3021,8 +3032,7 @@ TEST_P(ColumnFamilyTest, IteratorCloseWALFile1) {
   SpecialEnv env(Env::Default());
   db_options_.env = &env;
   db_options_.max_background_flushes = 1;
-  column_family_options_.memtable_factory.reset(
-      test::NewSpecialSkipListFactory(2));
+  column_family_options_.memtable_factory.reset(new SpecialSkipListFactory(2));
   Open();
   CreateColumnFamilies({"one"});
   ASSERT_OK(Put(1, "fodor", "mirko"));
@@ -3030,7 +3040,7 @@ TEST_P(ColumnFamilyTest, IteratorCloseWALFile1) {
   Iterator* it = db_->NewIterator(ReadOptions(), handles_[1]);
   ASSERT_OK(it->status());
   // A flush will make `it` hold the last reference of its super version.
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   ASSERT_OK(Put(1, "fodor", "mirko"));
   ASSERT_OK(Put(0, "fodor", "mirko"));
@@ -3073,8 +3083,7 @@ TEST_P(ColumnFamilyTest, IteratorCloseWALFile2) {
   env.SetBackgroundThreads(2, Env::HIGH);
   db_options_.env = &env;
   db_options_.max_background_flushes = 1;
-  column_family_options_.memtable_factory.reset(
-      test::NewSpecialSkipListFactory(2));
+  column_family_options_.memtable_factory.reset(new SpecialSkipListFactory(2));
   Open();
   CreateColumnFamilies({"one"});
   ASSERT_OK(Put(1, "fodor", "mirko"));
@@ -3084,7 +3093,7 @@ TEST_P(ColumnFamilyTest, IteratorCloseWALFile2) {
   Iterator* it = db_->NewIterator(ro, handles_[1]);
   ASSERT_OK(it->status());
   // A flush will make `it` hold the last reference of its super version.
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   ASSERT_OK(Put(1, "fodor", "mirko"));
   ASSERT_OK(Put(0, "fodor", "mirko"));
@@ -3132,14 +3141,13 @@ TEST_P(ColumnFamilyTest, ForwardIteratorCloseWALFile) {
   env.SetBackgroundThreads(2, Env::HIGH);
   db_options_.env = &env;
   db_options_.max_background_flushes = 1;
-  column_family_options_.memtable_factory.reset(
-      test::NewSpecialSkipListFactory(3));
+  column_family_options_.memtable_factory.reset(new SpecialSkipListFactory(3));
   column_family_options_.level0_file_num_compaction_trigger = 2;
   Open();
   CreateColumnFamilies({"one"});
   ASSERT_OK(Put(1, "fodor", "mirko"));
   ASSERT_OK(Put(1, "fodar2", "mirko"));
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   // Create an iterator holding the current super version, as well as
   // the SST file just flushed.
@@ -3151,7 +3159,7 @@ TEST_P(ColumnFamilyTest, ForwardIteratorCloseWALFile) {
 
   ASSERT_OK(Put(1, "fodor", "mirko"));
   ASSERT_OK(Put(1, "fodar2", "mirko"));
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   WaitForCompaction();
 
@@ -3224,9 +3232,9 @@ TEST_P(ColumnFamilyTest, LogSyncConflictFlush) {
   ROCKSDB_NAMESPACE::port::Thread thread([&] { ASSERT_OK(db_->SyncWAL()); });
 
   TEST_SYNC_POINT("ColumnFamilyTest::LogSyncConflictFlush:1");
-  ASSERT_OK(Flush(1));
+  Flush(1);
   ASSERT_OK(Put(1, "foo", "bar"));
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   TEST_SYNC_POINT("ColumnFamilyTest::LogSyncConflictFlush:2");
 
@@ -3248,7 +3256,7 @@ TEST_P(ColumnFamilyTest, DISABLED_LogTruncationTest) {
   Build(0, 100);
 
   // Flush the 0th column family to force a roll of the wal log
-  ASSERT_OK(Flush(0));
+  Flush(0);
 
   // Add some more entries
   Build(100, 100);
@@ -3324,14 +3332,14 @@ TEST_P(ColumnFamilyTest, DefaultCfPathsTest) {
 
   // Fill Column family 1.
   PutRandomData(1, 100, 100);
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   ASSERT_EQ(1, GetSstFileCount(cf_opt1.cf_paths[0].path));
   ASSERT_EQ(0, GetSstFileCount(dbname_));
 
   // Fill column family 2
   PutRandomData(2, 100, 100);
-  ASSERT_OK(Flush(2));
+  Flush(2);
 
   // SST from Column family 2 should be generated in
   // db_paths which is dbname_ in this case.
@@ -3350,14 +3358,14 @@ TEST_P(ColumnFamilyTest, MultipleCFPathsTest) {
   Reopen({ColumnFamilyOptions(), cf_opt1, cf_opt2});
 
   PutRandomData(1, 100, 100, true /* save */);
-  ASSERT_OK(Flush(1));
+  Flush(1);
 
   // Check that files are generated in appropriate paths.
   ASSERT_EQ(1, GetSstFileCount(cf_opt1.cf_paths[0].path));
   ASSERT_EQ(0, GetSstFileCount(dbname_));
 
   PutRandomData(2, 100, 100, true /* save */);
-  ASSERT_OK(Flush(2));
+  Flush(2);
 
   ASSERT_EQ(1, GetSstFileCount(cf_opt2.cf_paths[0].path));
   ASSERT_EQ(0, GetSstFileCount(dbname_));
@@ -3383,55 +3391,15 @@ TEST_P(ColumnFamilyTest, MultipleCFPathsTest) {
   }
 }
 
-TEST(ColumnFamilyTest, ValidateBlobGCCutoff) {
-  DBOptions db_options;
-
-  ColumnFamilyOptions cf_options;
-  cf_options.enable_blob_garbage_collection = true;
-
-  cf_options.blob_garbage_collection_age_cutoff = -0.5;
-  ASSERT_TRUE(ColumnFamilyData::ValidateOptions(db_options, cf_options)
-                  .IsInvalidArgument());
-
-  cf_options.blob_garbage_collection_age_cutoff = 0.0;
-  ASSERT_OK(ColumnFamilyData::ValidateOptions(db_options, cf_options));
-
-  cf_options.blob_garbage_collection_age_cutoff = 0.5;
-  ASSERT_OK(ColumnFamilyData::ValidateOptions(db_options, cf_options));
-
-  cf_options.blob_garbage_collection_age_cutoff = 1.0;
-  ASSERT_OK(ColumnFamilyData::ValidateOptions(db_options, cf_options));
-
-  cf_options.blob_garbage_collection_age_cutoff = 1.5;
-  ASSERT_TRUE(ColumnFamilyData::ValidateOptions(db_options, cf_options)
-                  .IsInvalidArgument());
-}
-
-TEST(ColumnFamilyTest, ValidateBlobGCForceThreshold) {
-  DBOptions db_options;
-
-  ColumnFamilyOptions cf_options;
-  cf_options.enable_blob_garbage_collection = true;
-
-  cf_options.blob_garbage_collection_force_threshold = -0.5;
-  ASSERT_TRUE(ColumnFamilyData::ValidateOptions(db_options, cf_options)
-                  .IsInvalidArgument());
-
-  cf_options.blob_garbage_collection_force_threshold = 0.0;
-  ASSERT_OK(ColumnFamilyData::ValidateOptions(db_options, cf_options));
-
-  cf_options.blob_garbage_collection_force_threshold = 0.5;
-  ASSERT_OK(ColumnFamilyData::ValidateOptions(db_options, cf_options));
-
-  cf_options.blob_garbage_collection_force_threshold = 1.0;
-  ASSERT_OK(ColumnFamilyData::ValidateOptions(db_options, cf_options));
-
-  cf_options.blob_garbage_collection_force_threshold = 1.5;
-  ASSERT_TRUE(ColumnFamilyData::ValidateOptions(db_options, cf_options)
-                  .IsInvalidArgument());
-}
-
 }  // namespace ROCKSDB_NAMESPACE
+
+#ifdef ROCKSDB_UNITTESTS_WITH_CUSTOM_OBJECTS_FROM_STATIC_LIBS
+extern "C" {
+void RegisterCustomObjects(int argc, char** argv);
+}
+#else
+void RegisterCustomObjects(int /*argc*/, char** /*argv*/) {}
+#endif  // !ROCKSDB_UNITTESTS_WITH_CUSTOM_OBJECTS_FROM_STATIC_LIBS
 
 int main(int argc, char** argv) {
   ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();

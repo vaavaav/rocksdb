@@ -51,7 +51,6 @@ class SharedBlobFileMetaData {
   SharedBlobFileMetaData(SharedBlobFileMetaData&&) = delete;
   SharedBlobFileMetaData& operator=(SharedBlobFileMetaData&&) = delete;
 
-  uint64_t GetBlobFileSize() const;
   uint64_t GetBlobFileNumber() const { return blob_file_number_; }
   uint64_t GetTotalBlobCount() const { return total_blob_count_; }
   uint64_t GetTotalBlobBytes() const { return total_blob_bytes_; }
@@ -111,11 +110,6 @@ class BlobFileMetaData {
 
   const std::shared_ptr<SharedBlobFileMetaData>& GetSharedMeta() const {
     return shared_meta_;
-  }
-
-  uint64_t GetBlobFileSize() const {
-    assert(shared_meta_);
-    return shared_meta_->GetBlobFileSize();
   }
 
   uint64_t GetBlobFileNumber() const {

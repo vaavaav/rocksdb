@@ -45,8 +45,7 @@ class WalManager {
         fs_(db_options.fs, io_tracer),
         purge_wal_files_last_run_(0),
         seq_per_batch_(seq_per_batch),
-        wal_dir_(db_options_.GetWalDir()),
-        wal_in_db_path_(db_options_.IsWalDirSameAsDBPath()),
+        wal_in_db_path_(IsWalDirSameAsDBPath(&db_options)),
         io_tracer_(io_tracer) {}
 
   Status GetSortedWalFiles(VectorLogPtr& files);
@@ -106,8 +105,6 @@ class WalManager {
   uint64_t purge_wal_files_last_run_;
 
   bool seq_per_batch_;
-
-  const std::string& wal_dir_;
 
   bool wal_in_db_path_;
 

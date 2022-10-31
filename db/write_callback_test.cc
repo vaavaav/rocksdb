@@ -84,7 +84,6 @@ class MockWriteCallback : public WriteCallback {
   bool AllowWriteBatching() override { return allow_batching_; }
 };
 
-#if !defined(ROCKSDB_VALGRIND_RUN) || defined(ROCKSDB_FULL_VALGRIND_RUN)
 class WriteCallbackPTest
     : public WriteCallbackTest,
       public ::testing::WithParamInterface<
@@ -112,7 +111,7 @@ TEST_P(WriteCallbackPTest, WriteWithCallbackTest) {
 
     void Put(const string& key, const string& val) {
       kvs_.push_back(std::make_pair(key, val));
-      ASSERT_OK(write_batch_.Put(key, val));
+      write_batch_.Put(key, val);
     }
 
     void Clear() {
@@ -320,7 +319,7 @@ TEST_P(WriteCallbackPTest, WriteWithCallbackTest) {
           DBImpl* db_impl_;
         } publish_seq_callback(db_impl);
         // seq_per_batch_ requires a natural batch separator or Noop
-        ASSERT_OK(WriteBatchInternal::InsertNoop(&write_op.write_batch_));
+        WriteBatchInternal::InsertNoop(&write_op.write_batch_);
         const size_t ONE_BATCH = 1;
         s = db_impl->WriteImpl(woptions, &write_op.write_batch_,
                                &write_op.callback_, nullptr, 0, false, nullptr,
@@ -377,7 +376,6 @@ INSTANTIATE_TEST_CASE_P(WriteCallbackPTest, WriteCallbackPTest,
                                            ::testing::Bool(), ::testing::Bool(),
                                            ::testing::Bool(), ::testing::Bool(),
                                            ::testing::Bool()));
-#endif  // !defined(ROCKSDB_VALGRIND_RUN) || defined(ROCKSDB_FULL_VALGRIND_RUN)
 
 TEST_F(WriteCallbackTest, WriteCallBackTest) {
   Options options;
@@ -398,8 +396,8 @@ TEST_F(WriteCallbackTest, WriteCallBackTest) {
 
   WriteBatch wb;
 
-  ASSERT_OK(wb.Put("a", "value.a"));
-  ASSERT_OK(wb.Delete("x"));
+  wb.Put("a", "value.a");
+  wb.Delete("x");
 
   // Test a simple Write
   s = db->Write(write_options, &wb);
@@ -413,7 +411,7 @@ TEST_F(WriteCallbackTest, WriteCallBackTest) {
   WriteCallbackTestWriteCallback1 callback1;
   WriteBatch wb2;
 
-  ASSERT_OK(wb2.Put("a", "value.a2"));
+  wb2.Put("a", "value.a2");
 
   s = db_impl->WriteWithCallback(write_options, &wb2, &callback1);
   ASSERT_OK(s);
@@ -427,7 +425,7 @@ TEST_F(WriteCallbackTest, WriteCallBackTest) {
   WriteCallbackTestWriteCallback2 callback2;
   WriteBatch wb3;
 
-  ASSERT_OK(wb3.Put("a", "value.a3"));
+  wb3.Put("a", "value.a3");
 
   s = db_impl->WriteWithCallback(write_options, &wb3, &callback2);
   ASSERT_NOK(s);

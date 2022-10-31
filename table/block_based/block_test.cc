@@ -4,10 +4,7 @@
 //  (found in the LICENSE.Apache file in the root directory).
 //
 
-#include "table/block_based/block.h"
-
 #include <stdio.h>
-
 #include <algorithm>
 #include <set>
 #include <string>
@@ -23,7 +20,7 @@
 #include "rocksdb/iterator.h"
 #include "rocksdb/slice_transform.h"
 #include "rocksdb/table.h"
-#include "table/block_based/block_based_table_reader.h"
+#include "table/block_based/block.h"
 #include "table/block_based/block_builder.h"
 #include "table/format.h"
 #include "test_util/testharness.h"
@@ -523,7 +520,7 @@ void GenerateRandomIndexEntries(std::vector<std::string> *separators,
     separators->emplace_back(*it++);
     uint64_t size = rnd.Uniform(1024 * 16);
     BlockHandle handle(offset, size);
-    offset += size + BlockBasedTable::kBlockTrailerSize;
+    offset += size + kBlockTrailerSize;
     block_handles->emplace_back(handle);
   }
 }

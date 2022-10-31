@@ -65,11 +65,9 @@ class Status {
   // In case of intentionally swallowing an error, user must explicitly call
   // this function. That way we are easily able to search the code to find where
   // error swallowing occurs.
-  inline void PermitUncheckedError() const { MarkChecked(); }
-
-  inline void MustCheck() const {
+  void PermitUncheckedError() const {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = false;
+    checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
   }
 
@@ -94,7 +92,9 @@ class Status {
   };
 
   Code code() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code_;
   }
 
@@ -118,7 +118,9 @@ class Status {
   };
 
   SubCode subcode() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return subcode_;
   }
 
@@ -132,18 +134,18 @@ class Status {
   };
 
   Status(const Status& s, Severity sev);
-
-  Status(Code _code, SubCode _subcode, Severity _sev, const Slice& msg)
-      : Status(_code, _subcode, msg, "", _sev) {}
-
   Severity severity() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return sev_;
   }
 
   // Returns a C style string indicating the message of the Status
   const char* getState() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return state_;
   }
 
@@ -287,95 +289,127 @@ class Status {
 
   // Returns true iff the status indicates success.
   bool ok() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kOk;
   }
 
   // Returns true iff the status indicates success *with* something
   // overwritten
   bool IsOkOverwritten() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kOk && subcode() == kOverwritten;
   }
 
   // Returns true iff the status indicates a NotFound error.
   bool IsNotFound() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kNotFound;
   }
 
   // Returns true iff the status indicates a Corruption error.
   bool IsCorruption() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kCorruption;
   }
 
   // Returns true iff the status indicates a NotSupported error.
   bool IsNotSupported() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kNotSupported;
   }
 
   // Returns true iff the status indicates an InvalidArgument error.
   bool IsInvalidArgument() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kInvalidArgument;
   }
 
   // Returns true iff the status indicates an IOError.
   bool IsIOError() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kIOError;
   }
 
   // Returns true iff the status indicates an MergeInProgress.
   bool IsMergeInProgress() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kMergeInProgress;
   }
 
   // Returns true iff the status indicates Incomplete
   bool IsIncomplete() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kIncomplete;
   }
 
   // Returns true iff the status indicates Shutdown In progress
   bool IsShutdownInProgress() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kShutdownInProgress;
   }
 
   bool IsTimedOut() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kTimedOut;
   }
 
   bool IsAborted() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kAborted;
   }
 
   bool IsLockLimit() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kAborted && subcode() == kLockLimit;
   }
 
   // Returns true iff the status indicates that a resource is Busy and
   // temporarily could not be acquired.
   bool IsBusy() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kBusy;
   }
 
   bool IsDeadlock() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kBusy && subcode() == kDeadlock;
   }
 
   // Returns true iff the status indicated that the operation has Expired.
   bool IsExpired() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kExpired;
   }
 
@@ -383,19 +417,25 @@ class Status {
   // This usually means that the operation failed, but may succeed if
   // re-attempted.
   bool IsTryAgain() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kTryAgain;
   }
 
   // Returns true iff the status indicates the proposed compaction is too large
   bool IsCompactionTooLarge() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kCompactionTooLarge;
   }
 
   // Returns true iff the status indicates Column Family Dropped
   bool IsColumnFamilyDropped() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return code() == kColumnFamilyDropped;
   }
 
@@ -405,7 +445,9 @@ class Status {
   // with a specific subcode, enabling users to take the appropriate action
   // if needed
   bool IsNoSpace() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return (code() == kIOError) && (subcode() == kNoSpace);
   }
 
@@ -413,7 +455,9 @@ class Status {
   // cases where we limit the memory used in certain operations (eg. the size
   // of a write batch) in order to avoid out of memory exceptions.
   bool IsMemoryLimit() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return (code() == kAborted) && (subcode() == kMemoryLimit);
   }
 
@@ -422,7 +466,9 @@ class Status {
   // directory" error condition. A PathNotFound error is an I/O error with
   // a specific subcode, enabling users to take appropriate action if necessary
   bool IsPathNotFound() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return (code() == kIOError || code() == kNotFound) &&
            (subcode() == kPathNotFound);
   }
@@ -430,19 +476,25 @@ class Status {
   // Returns true iff the status indicates manual compaction paused. This
   // is caused by a call to PauseManualCompaction
   bool IsManualCompactionPaused() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return (code() == kIncomplete) && (subcode() == kManualCompactionPaused);
   }
 
   // Returns true iff the status indicates a TxnNotPrepared error.
   bool IsTxnNotPrepared() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return (code() == kInvalidArgument) && (subcode() == kTxnNotPrepared);
   }
 
   // Returns true iff the status indicates a IOFenced error.
   bool IsIOFenced() const {
-    MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     return (code() == kIOError) && (subcode() == kIOFenced);
   }
 
@@ -451,11 +503,14 @@ class Status {
   std::string ToString() const;
 
  protected:
+  // A nullptr state_ (which is always the case for OK) means the message
+  // is empty.
+  // of the following form:
+  //    state_[0..3] == length of message
+  //    state_[4..]  == message
   Code code_;
   SubCode subcode_;
   Severity sev_;
-  // A nullptr state_ (which is at least the case for OK) means the extra
-  // message is empty.
   const char* state_;
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
   mutable bool checked_ = false;
@@ -464,34 +519,33 @@ class Status {
   explicit Status(Code _code, SubCode _subcode = kNone)
       : code_(_code), subcode_(_subcode), sev_(kNoError), state_(nullptr) {}
 
-  Status(Code _code, SubCode _subcode, const Slice& msg, const Slice& msg2,
-         Severity sev = kNoError);
+  Status(Code _code, SubCode _subcode, const Slice& msg, const Slice& msg2);
   Status(Code _code, const Slice& msg, const Slice& msg2)
       : Status(_code, kNone, msg, msg2) {}
 
   static const char* CopyState(const char* s);
-
-  inline void MarkChecked() const {
-#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
-#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  }
 };
 
 inline Status::Status(const Status& s)
     : code_(s.code_), subcode_(s.subcode_), sev_(s.sev_) {
-  s.MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+  s.checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
   state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
 }
 inline Status::Status(const Status& s, Severity sev)
     : code_(s.code_), subcode_(s.subcode_), sev_(sev) {
-  s.MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+  s.checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
   state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
 }
 inline Status& Status::operator=(const Status& s) {
   if (this != &s) {
-    s.MarkChecked();
-    MustCheck();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    s.checked_ = true;
+    checked_ = false;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     code_ = s.code_;
     subcode_ = s.subcode_;
     sev_ = s.sev_;
@@ -506,7 +560,9 @@ inline Status::Status(Status&& s)
     noexcept
 #endif
     : Status() {
-  s.MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+  s.checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
   *this = std::move(s);
 }
 
@@ -516,8 +572,10 @@ inline Status& Status::operator=(Status&& s)
 #endif
 {
   if (this != &s) {
-    s.MarkChecked();
-    MustCheck();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    s.checked_ = true;
+    checked_ = false;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     code_ = std::move(s.code_);
     s.code_ = kOk;
     subcode_ = std::move(s.subcode_);
@@ -532,14 +590,18 @@ inline Status& Status::operator=(Status&& s)
 }
 
 inline bool Status::operator==(const Status& rhs) const {
-  MarkChecked();
-  rhs.MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+  checked_ = true;
+  rhs.checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
   return (code_ == rhs.code_);
 }
 
 inline bool Status::operator!=(const Status& rhs) const {
-  MarkChecked();
-  rhs.MarkChecked();
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+  checked_ = true;
+  rhs.checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
   return !(*this == rhs);
 }
 
