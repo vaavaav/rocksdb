@@ -20,8 +20,11 @@
 #include <cstdarg>
 #include <functional>
 #include <limits>
+#include <map> /*vaavaav*/
 #include <memory>
+#include <mutex> /*vaavaav*/
 #include <string>
+#include <thread> /*vaavaav*/
 #include <vector>
 #include "rocksdb/status.h"
 #include "rocksdb/thread_status.h"
@@ -58,6 +61,11 @@ class RateLimiter;
 class ThreadStatusUpdater;
 struct ThreadStatus;
 class FileSystem;
+
+/*vaavaav*/
+extern std::mutex vaavaav_mutex;
+extern std::map<std::thread::id, ThreadStatus::OperationType> vaavaav_threads;
+
 
 const size_t kDefaultPageSize = 4 * 1024;
 

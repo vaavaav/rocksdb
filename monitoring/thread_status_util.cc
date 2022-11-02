@@ -55,7 +55,7 @@ void ThreadStatusUtil::SetThreadOperation(ThreadStatus::OperationType op) {
     // or other ThreadStatusUtil functions.
     return;
   }
-
+  
   if (op != ThreadStatus::OP_UNKNOWN) {
     uint64_t current_time = Env::Default()->NowMicros();
     thread_updater_local_cache_->SetOperationStartTime(current_time);

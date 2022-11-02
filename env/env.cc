@@ -18,8 +18,13 @@
 #include "rocksdb/options.h"
 #include "rocksdb/utilities/object_registry.h"
 #include "util/autovector.h"
+#include "rocksdb/thread_status.h"
 
 namespace ROCKSDB_NAMESPACE {
+
+/*vaavaav*/
+std::mutex vaavaav_mutex;
+std::map<std::thread::id, ThreadStatus::OperationType> vaavaav_threads;
 
 Env::Env() : thread_status_updater_(nullptr) {
   file_system_ = std::make_shared<LegacyFileSystemWrapper>(this);

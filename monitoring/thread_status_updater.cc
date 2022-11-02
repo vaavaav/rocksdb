@@ -4,10 +4,13 @@
 //  (found in the LICENSE.Apache file in the root directory).
 
 #include "monitoring/thread_status_updater.h"
+#include <mutex>
+#include <thread>
 #include <memory>
 #include "port/likely.h"
 #include "rocksdb/env.h"
 #include "util/mutexlock.h"
+#include <iostream>
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -65,6 +68,11 @@ const void* ThreadStatusUpdater::GetColumnFamilyInfoKey() {
 
 void ThreadStatusUpdater::SetThreadOperation(
     const ThreadStatus::OperationType type) {
+  {
+    std::lock_guard<std::mutex> guard  (vaavaav_mutex);
+    std::cout << std::this_thread::get_id() << ": " << type << "\n";
+    vaavaav_threads[std::this_thread::get_id()] = type;
+  }
   auto* data = GetLocalThreadStatus();
   if (data == nullptr) {
     return;
@@ -74,6 +82,8 @@ void ThreadStatusUpdater::SetThreadOperation(
   //       will be set in std::memory_order_release.  This is to ensure
   //       whenever a thread operation is not OP_UNKNOWN, we will always
   //       have a consistent information on its properties.
+  /*vaavaav*/
+
   data->operation_type.store(type, std::memory_order_release);
   if (type == ThreadStatus::OP_UNKNOWN) {
     data->operation_stage.store(ThreadStatus::STAGE_UNKNOWN,
