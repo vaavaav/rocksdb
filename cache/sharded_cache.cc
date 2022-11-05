@@ -10,13 +10,10 @@
 #include "cache/sharded_cache.h"
 
 #include <string>
-#include <iostream>
-#include <thread>
-#include <ctime>
-#include <fstream>
 
 #include "util/mutexlock.h"
-#include "rocksdb/thread_status.h"
+#include "thesis_profiling.cc"
+
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -28,11 +25,7 @@ ShardedCache::ShardedCache(size_t capacity, int num_shard_bits,
       capacity_(capacity),
       strict_capacity_limit_(strict_capacity_limit),
       last_id_(1)
-      {
-        /*vaavaav*/
-        trace_file.open("trace_file.txt");
-        assert(trace_file.is_open());
-      }
+      {}
 
 
 void ShardedCache::SetCapacity(size_t capacity) {
@@ -58,11 +51,9 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
                             void (*deleter)(const Slice& key, void* value),
                             Handle** handle, Priority priority) {
   uint32_t hash = HashSlice(key);
-  /*vaavaav*/ 
-  {
-    std::lock_guard<std::mutex> guard  (vaavaav_mutex);
-    trace_file << std::time(nullptr) << "-" << std::this_thread::get_id() <<  "-" << ThreadStatus::GetOperationName(vaavaav_threads[std::this_thread::get_id()]) << "\n";
-  }
+  /*vaavaav*/
+  tp.insert();
+
   return GetShard(Shard(hash))
       ->Insert(key, hash, value, charge, deleter, handle, priority);
 }

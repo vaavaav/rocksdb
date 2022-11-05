@@ -69,9 +69,9 @@ const void* ThreadStatusUpdater::GetColumnFamilyInfoKey() {
 void ThreadStatusUpdater::SetThreadOperation(
     const ThreadStatus::OperationType type) {
   {
-    std::lock_guard<std::mutex> guard  (vaavaav_mutex);
+    std::lock_guard<std::mutex> guard  (threads_ops_mutex);
     std::cout << std::this_thread::get_id() << ": " << type << "\n";
-    vaavaav_threads[std::this_thread::get_id()] = type;
+    threads_ops[std::this_thread::get_id()] = type;
   }
   auto* data = GetLocalThreadStatus();
   if (data == nullptr) {
