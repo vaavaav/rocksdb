@@ -70,7 +70,6 @@ void ThreadStatusUpdater::SetThreadOperation(
     const ThreadStatus::OperationType type) {
   {
     std::lock_guard<std::mutex> guard  (threads_ops_mutex);
-    std::cout << std::this_thread::get_id() << ": " << type << "\n";
     threads_ops[std::this_thread::get_id()] = type;
   }
   auto* data = GetLocalThreadStatus();
@@ -82,7 +81,6 @@ void ThreadStatusUpdater::SetThreadOperation(
   //       will be set in std::memory_order_release.  This is to ensure
   //       whenever a thread operation is not OP_UNKNOWN, we will always
   //       have a consistent information on its properties.
-  /*vaavaav*/
 
   data->operation_type.store(type, std::memory_order_release);
   if (type == ThreadStatus::OP_UNKNOWN) {

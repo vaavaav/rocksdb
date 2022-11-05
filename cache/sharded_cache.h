@@ -16,7 +16,6 @@
 #include "port/port.h"
 #include "rocksdb/cache.h"
 #include "util/hash.h"
-#include "thesis_profiling.cc"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -92,8 +91,6 @@ class ShardedCache : public Cache {
   int GetNumShardBits() const { return num_shard_bits_; }
 
  private:
-  /* vaavaav */
-  ThesisProfiling tp ;
 
   static inline uint32_t HashSlice(const Slice& s) {
     return static_cast<uint32_t>(GetSliceNPHash64(s));

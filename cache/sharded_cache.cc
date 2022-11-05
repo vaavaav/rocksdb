@@ -14,6 +14,7 @@
 #include "util/mutexlock.h"
 #include "thesis_profiling.cc"
 
+static ThesisProfiling tp;
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -26,7 +27,6 @@ ShardedCache::ShardedCache(size_t capacity, int num_shard_bits,
       strict_capacity_limit_(strict_capacity_limit),
       last_id_(1)
       {}
-
 
 void ShardedCache::SetCapacity(size_t capacity) {
   int num_shards = 1 << num_shard_bits_;
@@ -60,7 +60,9 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
  
 Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/) {
   uint32_t hash = HashSlice(key);
-  return GetShard(Shard(hash))->Lookup(key, hash);
+  auto result = GetShard(Shard(hash))->Lookup(key, hash);
+  tp.look_up(result != nullptr);
+  return result; 
 }
 
 bool ShardedCache::Ref(Handle* handle) {
