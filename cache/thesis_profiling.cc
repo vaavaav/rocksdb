@@ -9,6 +9,7 @@
 #include <thread>
 #include <chrono>
 #include <iostream>
+#include <atomic>
 #include "rocksdb/env.h"
 
 enum thread_t {UNKNOWN = 0, COMPACTION, FLUSH, FOREGROUND, NUM_THREAD_T};
@@ -16,13 +17,13 @@ enum thread_t {UNKNOWN = 0, COMPACTION, FLUSH, FOREGROUND, NUM_THREAD_T};
 static auto thread_tToString(const thread_t x) -> std::string {
   switch (x) {
     case UNKNOWN:
-      return "U";
+      return "unknown";
     case COMPACTION:
-      return "C";
+      return "compaction";
     case FLUSH:
-      return "Fl";
+      return "flush";
     case FOREGROUND:
-      return "Fo";
+      return "foreground";
     default:
       return "";
   };
@@ -37,7 +38,7 @@ struct Profile {
 class ThesisProfiling {
  public:
   ThesisProfiling() {
-    trace_file.open("trace_file.txt");
+    trace_file.open("trace_file.json");
     assert(trace_file.is_open());
     writer = std::thread (&ThesisProfiling::cycle, this);
   }
@@ -45,34 +46,48 @@ class ThesisProfiling {
   ~ThesisProfiling() {
     stopWriter = true;
     writer.join();
-    trace_file << "-------" << std::endl;
-    writeCounterAccum();
     trace_file.close();
   }
 
   void writeCounter() {
     std::lock_guard<std::mutex> guard (profiles_mutex);
-    trace_file << time(0) << "=" << "{ ";
-    for (int i = 0; i < NUM_THREAD_T; i++) {
+    trace_file << "    {\n";
+    for (int i = 0; i < NUM_THREAD_T - 1; i++) {
       auto const& entry = counter[i];
-      trace_file << thread_tToString((thread_t) i) << ":" << "{ I=" << entry.inserts
-                 << ", L=" << entry.look_ups << " }, ";
+      trace_file << "      \"" << thread_tToString((thread_t) i) << "\" : {\n" 
+                 << "        \"I\" : " << entry.inserts << ",\n"
+                 << "        \"L\" : " << entry.look_ups << "\n"
+                 << "      },\n";
     }
-    trace_file << "}\n";
+    auto const& entry = counter[NUM_THREAD_T - 1];
+    trace_file << "      \"" << thread_tToString((thread_t) (NUM_THREAD_T - 1)) << "\" : {\n" 
+               << "        \"I\" : " << entry.inserts << ",\n"
+               << "        \"L\" : " << entry.look_ups << "\n"
+               << "      }\n";
+    if (stopWriter) {
+      trace_file << "    }\n";
+    } else {
+      trace_file << "    },\n";
+    }
   }
 
   void writeCounterAccum() {
     std::lock_guard<std::mutex> guard (profiles_mutex);
-    trace_file << "{ ";
-    for (int i = 0; i < NUM_THREAD_T; i++) {
-      auto const& entry = counter_accum[i];
-      trace_file << thread_tToString((thread_t) i) << ":" << "{ I=" << entry.inserts
-                 << ", L=" << entry.look_ups << ", HR="
-                 << (entry.look_ups
-                         ? (float) entry.hits / (float) entry.look_ups
-                         : 0) << " }, ";
+    for (int i = 0; i < NUM_THREAD_T - 1; i++) {
+      auto const& entry = counter[i];
+      trace_file << "    \"" << thread_tToString((thread_t) i) << "\" : {\n" 
+                 << "      \"I\" : " << entry.inserts << ",\n"
+                 << "      \"L\" : " << entry.look_ups << ",\n"
+                 << "      \"HR\" : " << (entry.look_ups ? (float) entry.hits / (float) entry.look_ups : 0) << "\n"
+                 << "    },\n";
     }
-    trace_file << "}\n";
+    auto const& entry = counter[NUM_THREAD_T - 1];
+    trace_file << "    \"" << thread_tToString((thread_t) (NUM_THREAD_T - 1)) << "\" : {\n" 
+               << "      \"I\" : " << entry.inserts << ",\n"
+               << "      \"L\" : " << entry.look_ups << ",\n"
+               << "      \"HR\" : " << (entry.look_ups ? (float) entry.hits / (float) entry.look_ups : 0) << "\n"
+               << "    }\n";
+    trace_file << "  }\n";
   }
 
   void resetCounter() {
@@ -113,12 +128,17 @@ class ThesisProfiling {
   }
 
   void cycle() {
+    trace_file << "{\n  \"time-series\" : [\n";
     while (!stopWriter) {
       writeCounter();
       resetCounter();
       std::this_thread::sleep_for(
      std::chrono::milliseconds(1000));
     }
+    writeCounter();
+    trace_file << "  ],\n  \"total\" : {\n";
+    writeCounterAccum();
+    trace_file << "}\n";
   }
 
  private:
