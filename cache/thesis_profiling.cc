@@ -1,45 +1,32 @@
 #pragma once
 
-#include "rocksdb/thread_status.h"
-#include <cassert>
-#include <fstream>
-#include <functional>
-#include <map>
-#include <mutex>
-#include <thread>
-#include <chrono>
-#include <iostream>
-#include <atomic>
 #include "rocksdb/env.h"
+#include "rocksdb/thread_status.h"
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <string.h>
+#include <string>
+#include <thread>
 
 enum thread_t {UNKNOWN = 0, COMPACTION, FLUSH, FOREGROUND, NUM_THREAD_T};
-
-static auto thread_tToString(const thread_t x) -> std::string {
-  switch (x) {
-    case UNKNOWN:
-      return "unknown";
-    case COMPACTION:
-      return "compaction";
-    case FLUSH:
-      return "flush";
-    case FOREGROUND:
-      return "foreground";
-    default:
-      return "";
-  };
-}
-
-struct Profile {
-  int inserts {0};
-  int look_ups {0};
-  int hits {0};
-};
+static std::string const thread_t_names[NUM_THREAD_T] = {"unknown","compaction","flush","foreground"};
+enum profile_t {INSERT = 0, LOOKUP, HIT, NUM_PROFILE_T};
+static std::string const profile_t_names[NUM_PROFILE_T] = {"insert","lookup","hit"};
 
 class ThesisProfiling {
  public:
   ThesisProfiling() {
-    trace_file.open("trace_file.json");
+    trace_file.open("trace_file.csv");
     assert(trace_file.is_open());
+    trace_file << "QUERY";
+    for (auto const& tt : thread_t_names) {
+      trace_file << "," << tt;
+    }
+    trace_file << std::endl;
     writer = std::thread (&ThesisProfiling::cycle, this);
   }
 
@@ -50,59 +37,25 @@ class ThesisProfiling {
   }
 
   void writeCounter() {
-    std::lock_guard<std::mutex> guard (profiles_mutex);
-    trace_file << "    {\n";
-    for (int i = 0; i < NUM_THREAD_T - 1; i++) {
-      auto const& entry = counter[i];
-      trace_file << "      \"" << thread_tToString((thread_t) i) << "\" : {\n" 
-                 << "        \"I\" : " << entry.inserts << ",\n"
-                 << "        \"L\" : " << entry.look_ups << "\n"
-                 << "      },\n";
+    std::lock_guard<std::mutex> guard(profiles_mutex);
+    for (int i = 0; i < NUM_PROFILE_T - 1; i++) {
+      trace_file << profile_t_names[i];
+      for (int j = 0; j < NUM_THREAD_T; j++) {
+        trace_file << "," << counter[j][i];
+      }
+      trace_file << std::endl;
     }
-    auto const& entry = counter[NUM_THREAD_T - 1];
-    trace_file << "      \"" << thread_tToString((thread_t) (NUM_THREAD_T - 1)) << "\" : {\n" 
-               << "        \"I\" : " << entry.inserts << ",\n"
-               << "        \"L\" : " << entry.look_ups << "\n"
-               << "      }\n";
-    if (stopWriter) {
-      trace_file << "    }\n";
-    } else {
-      trace_file << "    },\n";
-    }
-  }
-
-  void writeCounterAccum() {
-    std::lock_guard<std::mutex> guard (profiles_mutex);
-    for (int i = 0; i < NUM_THREAD_T - 1; i++) {
-      auto const& entry = counter[i];
-      trace_file << "    \"" << thread_tToString((thread_t) i) << "\" : {\n" 
-                 << "      \"I\" : " << entry.inserts << ",\n"
-                 << "      \"L\" : " << entry.look_ups << ",\n"
-                 << "      \"HR\" : " << (entry.look_ups ? (float) entry.hits / (float) entry.look_ups : 0) << "\n"
-                 << "    },\n";
-    }
-    auto const& entry = counter[NUM_THREAD_T - 1];
-    trace_file << "    \"" << thread_tToString((thread_t) (NUM_THREAD_T - 1)) << "\" : {\n" 
-               << "      \"I\" : " << entry.inserts << ",\n"
-               << "      \"L\" : " << entry.look_ups << ",\n"
-               << "      \"HR\" : " << (entry.look_ups ? (float) entry.hits / (float) entry.look_ups : 0) << "\n"
-               << "    }\n";
-    trace_file << "  }\n";
   }
 
   void resetCounter() {
     std::lock_guard<std::mutex> guard (profiles_mutex);
-    for (auto & entry : counter) {
-      entry.inserts = 0;
-      entry.hits = 0;
-      entry.look_ups = 0;
-    }
+    memset(counter, 0, sizeof(counter));
   }
 
   thread_t getThread_t() {
     return ({
       std::lock_guard<std::mutex> guard(threads_ops_mutex);
-      auto thread_op = threads_ops.find(std::this_thread::get_id());
+      auto const thread_op = threads_ops.find(std::this_thread::get_id());
       thread_op == threads_ops.end()
                              ? FOREGROUND
                              : (thread_t) thread_op->second;
@@ -110,25 +63,23 @@ class ThesisProfiling {
   }
 
   void insert() {
-    auto thread_type = getThread_t();
+    auto const thread_type = getThread_t();
     std::lock_guard<std::mutex> guard (profiles_mutex);
-    counter[thread_type].inserts++;
-    counter_accum[thread_type].inserts++;
+    counter[thread_type][INSERT]++;
+    counter_accum[thread_type][INSERT]++;
   }
 
-  void look_up(bool hit) {
-    auto thread_type = getThread_t();
+  void lookup(bool hit) {
+    auto const thread_type = getThread_t();
     std::lock_guard<std::mutex> guard (profiles_mutex);
-    counter[thread_type].look_ups++;
-    counter_accum[thread_type].look_ups++;
+    counter[thread_type][LOOKUP]++;
+    counter_accum[thread_type][LOOKUP]++;
     if (hit) {
-      counter[thread_type].hits++;
-      counter_accum[thread_type].hits++;
+      counter_accum[thread_type][HIT]++;
     }
   }
 
   void cycle() {
-    trace_file << "{\n  \"time-series\" : [\n";
     while (!stopWriter) {
       writeCounter();
       resetCounter();
@@ -136,15 +87,19 @@ class ThesisProfiling {
      std::chrono::milliseconds(1000));
     }
     writeCounter();
-    trace_file << "  ],\n  \"total\" : {\n";
-    writeCounterAccum();
-    trace_file << "}\n";
+    std::cout << "---------------------------------" << std::endl;
+    for (int i = 0; i < NUM_PROFILE_T; i++) {
+      std::cout << profile_t_names[i];
+      for (int j = 0; j < NUM_THREAD_T; j++) {
+        std::cout << "," << counter_accum[j][i];
+      }
+      std::cout << std::endl;
+    }
   }
 
  private:
-
-  Profile counter[NUM_THREAD_T]; 
-  Profile counter_accum[NUM_THREAD_T];
+  int counter[NUM_THREAD_T][NUM_PROFILE_T - 1]; 
+  int counter_accum[NUM_THREAD_T][NUM_PROFILE_T];
   std::mutex profiles_mutex;
 
   std::ofstream trace_file;

@@ -61,7 +61,7 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
 Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/) {
   uint32_t hash = HashSlice(key);
   auto result = GetShard(Shard(hash))->Lookup(key, hash);
-  tp.look_up(result != nullptr);
+  tp.lookup(result);
   return result; 
 }
 
