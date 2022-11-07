@@ -52,7 +52,7 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
                             Handle** handle, Priority priority) {
   uint32_t hash = HashSlice(key);
   /*vaavaav*/
-  tp.insert();
+  tp.insert(key.size(), charge);
 
   return GetShard(Shard(hash))
       ->Insert(key, hash, value, charge, deleter, handle, priority);

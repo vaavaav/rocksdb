@@ -14,15 +14,15 @@
 
 enum thread_t {UNKNOWN = 0, COMPACTION, FLUSH, FOREGROUND, NUM_THREAD_T};
 static std::string const thread_t_names[NUM_THREAD_T] = {"unknown","compaction","flush","foreground"};
-enum profile_t {INSERT = 0, LOOKUP, HIT, NUM_PROFILE_T};
-static std::string const profile_t_names[NUM_PROFILE_T] = {"insert","lookup","hit"};
+enum profile_t {INSERT = 0, LOOKUP, INS_MBYTES, HITS, NUM_PROFILE_T};
+static std::string const profile_t_names[NUM_PROFILE_T] = {"insert","lookup","inserted_mbytes","hits"};
 
 class ThesisProfiling {
  public:
   ThesisProfiling() {
     trace_file.open("trace_file.csv");
     assert(trace_file.is_open());
-    trace_file << "QUERY";
+    trace_file << "METRIC";
     for (auto const& tt : thread_t_names) {
       trace_file << "," << tt;
     }
@@ -45,7 +45,14 @@ class ThesisProfiling {
       }
       trace_file << std::endl;
     }
+    trace_file << "hitratio";
+    for (int i = 0; i < NUM_THREAD_T; i++) {
+      auto const& lu = counter[i][LOOKUP];
+      trace_file << "," << (lu ? (float) counter[i][HITS] / (float) lu : 0);
+    }
+    trace_file << std::endl;
   }
+
 
   void resetCounter() {
     std::lock_guard<std::mutex> guard (profiles_mutex);
@@ -62,20 +69,19 @@ class ThesisProfiling {
     });
   }
 
-  void insert() {
+  void insert(size_t keysize, size_t valuesize) {
     auto const thread_type = getThread_t();
     std::lock_guard<std::mutex> guard (profiles_mutex);
     counter[thread_type][INSERT]++;
-    counter_accum[thread_type][INSERT]++;
+    counter[thread_type][INS_MBYTES] += ((int) (keysize + valuesize)) >> 20;
   }
 
   void lookup(bool hit) {
     auto const thread_type = getThread_t();
     std::lock_guard<std::mutex> guard (profiles_mutex);
     counter[thread_type][LOOKUP]++;
-    counter_accum[thread_type][LOOKUP]++;
     if (hit) {
-      counter_accum[thread_type][HIT]++;
+      counter[thread_type][HITS]++;
     }
   }
 
@@ -87,20 +93,11 @@ class ThesisProfiling {
      std::chrono::milliseconds(1000));
     }
     writeCounter();
-    std::cout << "---------------------------------" << std::endl;
-    for (int i = 0; i < NUM_PROFILE_T; i++) {
-      std::cout << profile_t_names[i];
-      for (int j = 0; j < NUM_THREAD_T; j++) {
-        std::cout << "," << counter_accum[j][i];
-      }
-      std::cout << std::endl;
-    }
   }
 
  private:
-  int counter[NUM_THREAD_T][NUM_PROFILE_T - 1]; 
-  int counter_accum[NUM_THREAD_T][NUM_PROFILE_T];
   std::mutex profiles_mutex;
+  int counter[NUM_THREAD_T][NUM_PROFILE_T] {0}; 
 
   std::ofstream trace_file;
 
