@@ -19,9 +19,6 @@
 #include "rocksdb/utilities/object_registry.h"
 #include "util/autovector.h"
 
-std::mutex threads_ops_mutex;
-std::map<std::thread::id, ROCKSDB_NAMESPACE::ThreadStatus::OperationType> threads_ops;
-
 namespace ROCKSDB_NAMESPACE {
 
 Env::Env() : thread_status_updater_(nullptr) {

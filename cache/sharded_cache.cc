@@ -12,9 +12,7 @@
 #include <string>
 
 #include "util/mutexlock.h"
-#include "thesis_profiling.cc"
-
-static ThesisProfiling tp;
+#include "thesis_profiling.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -52,7 +50,7 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
                             Handle** handle, Priority priority) {
   uint32_t hash = HashSlice(key);
   /*vaavaav*/
-  tp.insert(key.size(), charge);
+  ThesisProfiling::getInstance().insert(key.size(), charge);
 
   return GetShard(Shard(hash))
       ->Insert(key, hash, value, charge, deleter, handle, priority);
@@ -61,7 +59,7 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
 Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/) {
   uint32_t hash = HashSlice(key);
   auto result = GetShard(Shard(hash))->Lookup(key, hash);
-  tp.lookup(result);
+  ThesisProfiling::getInstance().lookup(result);
   return result; 
 }
 

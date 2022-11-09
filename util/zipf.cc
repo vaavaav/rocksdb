@@ -4,6 +4,7 @@
 #include <time.h>
 #include <stdio.h>
 
+
 // 	*
 // 	 * Create a zipfian generator for items between min and max (inclusive) for the specified zipfian constant, using the precomputed value of zeta.
 // 	 * 
@@ -22,10 +23,10 @@ double zeta2theta; //initialized in init_zipf_generator function
 long countforzeta; //initialized in init_zipf_generator function
 long lastVal; //initialized in setLastValue
 
-void init_zipf_generator(long min, long max){
+void init_zipf_generator(double zipfian_coef, long min, long max){
 	items = max-min+1;
 	baseZipf = min;
-	zipfianconstant = 0.99;
+	zipfianconstant = zipfian_coef;
 	theta = zipfianconstant;
 	zeta2theta = zeta(0, 2, 0);
 	alpha = 1.0/(1.0-theta);

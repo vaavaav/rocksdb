@@ -24,13 +24,13 @@
 #include <string>
 #include <vector>
 #include "rocksdb/status.h"
-#include "rocksdb/thread_status.h"
+//#include "rocksdb/thread_status.h"
 #include <map>
 #include <thread>
 #include <mutex>
 
-extern std::mutex threads_ops_mutex;
-extern std::map<std::thread::id, ROCKSDB_NAMESPACE::ThreadStatus::OperationType> threads_ops;
+//extern std::mutex threads_ops_mutex;
+//extern std::map<std::thread::id, ROCKSDB_NAMESPACE::ThreadStatus::OperationType> threads_ops;
 
 
 #ifdef _WIN32

@@ -9,6 +9,7 @@
 #include <memory>
 #include "port/likely.h"
 #include "rocksdb/env.h"
+#include "cache/thesis_profiling.h"
 #include "util/mutexlock.h"
 #include <iostream>
 
