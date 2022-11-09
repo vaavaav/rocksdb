@@ -23,6 +23,7 @@ class ThesisProfiling {
         static ThesisProfiling& getInstance() {
             static ThesisProfiling instance;
             return instance;
+        }
 
         void start(std::string);
         void stop();
@@ -40,7 +41,6 @@ class ThesisProfiling {
 
         std::mutex profiles_mutex;
         int counter[NUM_THREAD_T][NUM_PROFILE_T]{0};
-
         std::ofstream result_file;
 
         std::atomic_bool stopWriter{false};

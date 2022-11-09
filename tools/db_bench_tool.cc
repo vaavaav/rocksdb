@@ -1393,8 +1393,11 @@ DEFINE_bool(YCSB_uniform_distribution, false,
 
 DEFINE_double(zipf_coef, 0.99, "Zipfian coeficient");
 
-DEFINE_string(profiling_file, "",
-              "File to store results of profilings");
+DEFINE_string(profiling_results_dir, ".",
+              "Directory to store profiling results");
+
+DEFINE_bool(profile, false,
+              "Directory to store profiling results");
 
 static const bool FLAGS_soft_rate_limit_dummy __attribute__((__unused__)) =
     RegisterFlagValidator(&FLAGS_soft_rate_limit, &ValidateRateLimit);
@@ -7901,9 +7904,13 @@ int db_bench_tool(int argc, char** argv) {
   // Initialize the zipf distribution for YCSB
   init_zipf_generator(FLAGS_zipf_coef, 0, FLAGS_num);
   init_latestgen(FLAGS_num);
-  ThesisProfiling::getInstance().start(FLAGS_profiling_file);
+  if(FLAGS_profile) {
+    ThesisProfiling::getInstance().start(FLAGS_profiling_results_dir);
+  }
   benchmark.Run();
-  ThesisProfiling::getInstance().stop();
+  if(FLAGS_profile) {
+    ThesisProfiling::getInstance().stop();
+  }
 
 #ifndef ROCKSDB_LITE
   if (FLAGS_print_malloc_stats) {

@@ -16,17 +16,16 @@ thread_t getThread_t() {
 }
 
 
-void ThesisProfiling::start(std::string result_file_path) {
-  if (result_file_path != "") {
-    result_file.open(result_file_path);
+void ThesisProfiling::start(std::string profiling_results_dir) {
+    result_file.open(profiling_results_dir + "/results.csv");
     assert(result_file.is_open());
     result_file << "METRIC";
     for (auto const& tt : thread_t_names) {
       result_file << "," << tt;
     }
+    result_file << ",global";
     result_file << std::endl;
     writer = std::thread(&ThesisProfiling::cycle, this);
-  }   
 }
 
 void ThesisProfiling::stop() {
@@ -55,16 +54,21 @@ void ThesisProfiling::lookup(bool hit) {
 void ThesisProfiling::dump() {
   std::lock_guard<std::mutex> guard(profiles_mutex);
   for (int i = 0; i < NUM_PROFILE_T - 1; i++) {
-    result_file << profile_t_names[i];
+    result_file << profile_t_names[i] << ",";
     for (int j = 0; j < NUM_THREAD_T; j++) {
-      result_file << "," << counter[j][i];
+      result_file << counter[j][i] << ",";
     }
     result_file << std::endl;
   }
-  result_file << "hitratio";
+  result_file << "hitratio,";
+  auto global_lu {0}; 
+  auto global_h  {0};
   for (int i = 0; i < NUM_THREAD_T; i++) {
-    result_file << "," << (float)counter[i][HITS] / (float)counter[i][LOOKUP];
+    global_lu = counter[i][LOOKUP]; 
+    global_h = counter[i][HITS]; 
+    result_file << (float)counter[i][HITS] / (float)counter[i][LOOKUP] << ",";
   }
+  result_file << (float)global_h / (float) global_lu; 
   result_file << std::endl;
 }
 
@@ -72,8 +76,6 @@ void ThesisProfiling::reset() {
   std::lock_guard<std::mutex> guard(profiles_mutex);
   memset(counter, 0, sizeof(counter));
 }
-
-
 
 void ThesisProfiling::cycle() {
   while (!stopWriter) {
