@@ -9,8 +9,8 @@
 
 enum thread_t {UNKNOWN = 0, COMPACTION, FLUSH, FOREGROUND, NUM_THREAD_T};
 static std::string const thread_t_names[NUM_THREAD_T] = {"unknown","compaction","flush","foreground"};
-enum profile_t {INSERT = 0, LOOKUP, INS_MBYTES, HITS, NUM_PROFILE_T};
-static std::string const profile_t_names[NUM_PROFILE_T] = {"insert","lookup","inserted_mbytes","hits"};
+enum profile_t {INSERT = 0, LOOKUP, INS_BYTES, HITS, NUM_PROFILE_T};
+static std::string const profile_t_names[NUM_PROFILE_T] = {"insert","lookup","inserted_bytes","hits"};
 
 
 extern std::mutex threads_ops_mutex;

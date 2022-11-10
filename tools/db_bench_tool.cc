@@ -1935,7 +1935,7 @@ class Stats {
   friend class CombinedStats;
 
  public:
-  Stats() { Start(-1); }
+  Stats() { Start(-1);  } 
 
   void SetReporterAgent(ReporterAgent* reporter_agent) {
     reporter_agent_ = reporter_agent;

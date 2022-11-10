@@ -29,17 +29,15 @@ void ThesisProfiling::start(std::string profiling_results_dir) {
 }
 
 void ThesisProfiling::stop() {
-  if (result_file.is_open()) {
-    stopWriter = true;
-    writer.join();
-  }
+  stopWriter = true;
+  writer.join();
 }
 
 void ThesisProfiling::insert(size_t keysize, size_t valuesize) {
   auto const thread_type = getThread_t();
   std::lock_guard<std::mutex> guard(profiles_mutex);
   counter[thread_type][INSERT]++;
-  counter[thread_type][INS_MBYTES] += ((int)(keysize + valuesize));
+  counter[thread_type][INS_BYTES] += ((int)(keysize + valuesize));
 }
 
 void ThesisProfiling::lookup(bool hit) {
@@ -72,16 +70,16 @@ void ThesisProfiling::dump() {
   result_file << std::endl;
 }
 
-void ThesisProfiling::reset() {
+inline void ThesisProfiling::reset() {
   std::lock_guard<std::mutex> guard(profiles_mutex);
   memset(counter, 0, sizeof(counter));
 }
 
 void ThesisProfiling::cycle() {
+  std::this_thread::sleep_for(std::chrono::seconds(1));
   while (!stopWriter) {
     dump();
     reset();
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
   }
-  dump();
 }
