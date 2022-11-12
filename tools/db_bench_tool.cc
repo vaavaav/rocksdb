@@ -1397,7 +1397,9 @@ DEFINE_string(profiling_results_dir, ".",
               "Directory to store profiling results");
 
 DEFINE_bool(profile, false,
-              "Directory to store profiling results");
+              "If true, a ThesisProfiling is instanciated and run.");
+
+DEFINE_bool(reject_compactions, false, "If true, compactions' inserts and lookups are rejected");
 
 static const bool FLAGS_soft_rate_limit_dummy __attribute__((__unused__)) =
     RegisterFlagValidator(&FLAGS_soft_rate_limit, &ValidateRateLimit);
@@ -1864,6 +1866,7 @@ class ReporterAgent {
       std::string report = ToString(secs_elapsed) + "," +
                            ToString(total_ops_done_snapshot - last_report_) +
                            "\n";
+                           ThesisProfiling::getInstance().qps(total_ops_done_snapshot - last_report_);
       auto s = report_file_->Append(report);
       if (s.ok()) {
         s = report_file_->Flush();
@@ -7905,7 +7908,7 @@ int db_bench_tool(int argc, char** argv) {
   init_zipf_generator(FLAGS_zipf_coef, 0, FLAGS_num);
   init_latestgen(FLAGS_num);
   if(FLAGS_profile) {
-    ThesisProfiling::getInstance().start(FLAGS_profiling_results_dir);
+    ThesisProfiling::getInstance().start(FLAGS_reject_compactions, FLAGS_profiling_results_dir);
   }
   benchmark.Run();
   if(FLAGS_profile) {

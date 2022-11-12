@@ -10,6 +10,7 @@
 #include "table/block_based/block_based_table_reader.h"
 
 #include "table/block_based/reader_common.h"
+#include "cache/thesis_profiling.h"
 
 // The file contains some member functions of BlockBasedTable that
 // cannot be implemented in block_based_table_reader.cc because
@@ -99,14 +100,16 @@ TBlockIter* BlockBasedTable::NewDataBlockIterator(
       assert(end - cache_key <=
              static_cast<int>(kExtraCacheKeyPrefix + kMaxVarint64Length));
       const Slice unique_key(cache_key, static_cast<size_t>(end - cache_key));
-      s = block_cache->Insert(unique_key, nullptr,
-                              block.GetValue()->ApproximateMemoryUsage(),
-                              nullptr, &cache_handle);
+      if (!ThesisProfiling::getInstance().isReject()) {
+        s = block_cache->Insert(unique_key, nullptr,
+                                block.GetValue()->ApproximateMemoryUsage(),
+                                nullptr, &cache_handle);
 
-      if (s.ok()) {
-        assert(cache_handle != nullptr);
-        iter->RegisterCleanup(&ForceReleaseCachedEntry, block_cache,
-                              cache_handle);
+        if (s.ok()) {
+          assert(cache_handle != nullptr);
+          iter->RegisterCleanup(&ForceReleaseCachedEntry, block_cache,
+                                cache_handle);
+        }
       }
     }
   } else {
@@ -171,13 +174,15 @@ TBlockIter* BlockBasedTable::NewDataBlockIterator(const ReadOptions& ro,
       assert(end - cache_key <=
              static_cast<int>(kExtraCacheKeyPrefix + kMaxVarint64Length));
       const Slice unique_key(cache_key, static_cast<size_t>(end - cache_key));
-      s = block_cache->Insert(unique_key, nullptr,
-                              block.GetValue()->ApproximateMemoryUsage(),
-                              nullptr, &cache_handle);
-      if (s.ok()) {
-        assert(cache_handle != nullptr);
-        iter->RegisterCleanup(&ForceReleaseCachedEntry, block_cache,
-                              cache_handle);
+      if(!ThesisProfiling::getInstance().isReject()) {
+        s = block_cache->Insert(unique_key, nullptr,
+                                block.GetValue()->ApproximateMemoryUsage(),
+                                nullptr, &cache_handle);
+        if (s.ok()) {
+          assert(cache_handle != nullptr);
+          iter->RegisterCleanup(&ForceReleaseCachedEntry, block_cache,
+                                cache_handle);
+        }
       }
     }
   } else {

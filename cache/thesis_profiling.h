@@ -25,10 +25,12 @@ class ThesisProfiling {
             return instance;
         }
 
-        void start(std::string);
+        void start(bool, std::string);
         void stop();
         void insert(size_t, size_t);
         void lookup(bool);
+        void qps(int);
+        bool isReject();
 
     private:
         ThesisProfiling() {};
@@ -41,8 +43,10 @@ class ThesisProfiling {
 
         std::mutex profiles_mutex;
         int counter[NUM_THREAD_T][NUM_PROFILE_T]{0};
+        std::atomic_int global_qps {0};
         std::ofstream result_file;
 
         std::atomic_bool stopWriter{false};
         std::thread writer;
+        bool reject_compactions {false};
 };
