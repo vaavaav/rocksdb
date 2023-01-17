@@ -29,6 +29,7 @@
 #include "util/cast_util.h"
 #include "util/coding.h"
 #include "util/stop_watch.h"
+#include "cache/thesis_profiling.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -164,20 +165,22 @@ Status TableCache::FindTable(const ReadOptions& ro,
   PERF_TIMER_GUARD_WITH_ENV(find_table_nanos, ioptions_.env);
   uint64_t number = fd.GetNumber();
   Slice key = GetSliceForFileNumber(&number);
-  *handle = cache_->Lookup(key);
-  TEST_SYNC_POINT_CALLBACK("TableCache::FindTable:0",
-                           const_cast<bool*>(&no_io));
-
-  if (*handle == nullptr) {
-    if (no_io) {
-      return Status::Incomplete("Table not found in table_cache, no_io is set");
-    }
-    MutexLock load_lock(loader_mutex_.get(key));
-    // We check the cache again under loading mutex
     *handle = cache_->Lookup(key);
-    if (*handle != nullptr) {
-      return Status::OK();
-    }
+    TEST_SYNC_POINT_CALLBACK("TableCache::FindTable:0",
+                             const_cast<bool*>(&no_io));
+
+    if (*handle == nullptr) {
+      if (no_io) {
+        return Status::Incomplete(
+            "Table not found in table_cache, no_io is set");
+      }
+      MutexLock load_lock(loader_mutex_.get(key));
+      // We check the cache again under loading mutex
+      *handle = cache_->Lookup(key);
+      if (*handle != nullptr) {
+        return Status::OK();
+      }
+    
 
     std::unique_ptr<TableReader> table_reader;
     Status s = GetTableReader(
@@ -199,7 +202,7 @@ Status TableCache::FindTable(const ReadOptions& ro,
       }
     }
     return s;
-  }
+    }
   return Status::OK();
 }
 
@@ -353,33 +356,33 @@ bool TableCache::GetFromRowCache(const Slice& user_key, IterKey& row_cache_key,
   bool found = false;
 
   row_cache_key.TrimAppend(prefix_size, user_key.data(), user_key.size());
-  if (auto row_handle =
-          ioptions_.row_cache->Lookup(row_cache_key.GetUserKey())) {
-    // Cleanable routine to release the cache entry
-    Cleanable value_pinner;
-    auto release_cache_entry_func = [](void* cache_to_clean,
-                                       void* cache_handle) {
-      ((Cache*)cache_to_clean)->Release((Cache::Handle*)cache_handle);
-    };
-    auto found_row_cache_entry =
-        static_cast<const std::string*>(ioptions_.row_cache->Value(row_handle));
-    // If it comes here value is located on the cache.
-    // found_row_cache_entry points to the value on cache,
-    // and value_pinner has cleanup procedure for the cached entry.
-    // After replayGetContextLog() returns, get_context.pinnable_slice_
-    // will point to cache entry buffer (or a copy based on that) and
-    // cleanup routine under value_pinner will be delegated to
-    // get_context.pinnable_slice_. Cache entry is released when
-    // get_context.pinnable_slice_ is reset.
-    value_pinner.RegisterCleanup(release_cache_entry_func,
-                                 ioptions_.row_cache.get(), row_handle);
-    replayGetContextLog(*found_row_cache_entry, user_key, get_context,
-                        &value_pinner);
-    RecordTick(ioptions_.statistics, ROW_CACHE_HIT);
-    found = true;
-  } else {
-    RecordTick(ioptions_.statistics, ROW_CACHE_MISS);
-  }
+    if (auto row_handle =
+            ioptions_.row_cache->Lookup(row_cache_key.GetUserKey())) {
+      // Cleanable routine to release the cache entry
+      Cleanable value_pinner;
+      auto release_cache_entry_func = [](void* cache_to_clean,
+                                         void* cache_handle) {
+        ((Cache*)cache_to_clean)->Release((Cache::Handle*)cache_handle);
+      };
+      auto found_row_cache_entry = static_cast<const std::string*>(
+          ioptions_.row_cache->Value(row_handle));
+      // If it comes here value is located on the cache.
+      // found_row_cache_entry points to the value on cache,
+      // and value_pinner has cleanup procedure for the cached entry.
+      // After replayGetContextLog() returns, get_context.pinnable_slice_
+      // will point to cache entry buffer (or a copy based on that) and
+      // cleanup routine under value_pinner will be delegated to
+      // get_context.pinnable_slice_. Cache entry is released when
+      // get_context.pinnable_slice_ is reset.
+      value_pinner.RegisterCleanup(release_cache_entry_func,
+                                   ioptions_.row_cache.get(), row_handle);
+      replayGetContextLog(*found_row_cache_entry, user_key, get_context,
+                          &value_pinner);
+      RecordTick(ioptions_.statistics, ROW_CACHE_HIT);
+      found = true;
+    } else {
+      RecordTick(ioptions_.statistics, ROW_CACHE_MISS);
+    }
   return found;
 }
 #endif  // ROCKSDB_LITE

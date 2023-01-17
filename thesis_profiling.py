@@ -43,7 +43,6 @@ settings = {
 loading = { 
     'num' : 50_000_000,
     'benchmarks' : 'ycsbfill',
-    'duration' : 20,
     'profile' : 'false',
     'report_interval_seconds' : 0,
     'use_existing_db' : 'false'
@@ -63,7 +62,7 @@ for i in zipfian_coeficients:
 }
 ## Reject compactions (with previous distributions)
 for setup in list(setups.keys()):
-    setups[f'{setup} without compactions'] = {**setups[setup], **{
+    setups[f'{setup} (w/o compactions)'] = {**setups[setup], **{
         'reject_compactions' : 'true',
         'profiling_results_dir' : f'{setups[setup]["profiling_results_dir"]}_zc'
     }}
@@ -117,16 +116,17 @@ def loadBackup():
 
 
 # Main execution
-if os.path.exists(results_dir):
-    shutil.rmtree(results_dir)
+#if os.path.exists(results_dir):
+#    shutil.rmtree(results_dir)
 
 
-subprocess.call([util_script, 'limit-mem', f'{page_cache_size}G'])
-runDBBench(loading) # load phase
-saveBackup()          # store db entries in a backup
+#subprocess.call([util_script, 'limit-mem', f'{page_cache_size}G'])
+#runDBBench(loading) # load phase
+#saveBackup()          # store db entries in a backup
 for setup in setups:
-    os.makedirs(setups[setup]['profiling_results_dir'], exist_ok=True)
-    loadBackup() # always load db backup before running
-    subprocess.call([util_script, 'clean-heap'])
-    runDBBench(setups[setup])
-    plot(setup, setups[setup]['profiling_results_dir'])
+    if 'reject_compactions' in setups[setup]:
+    #os.makedirs(setups[setup]['profiling_results_dir'], exist_ok=True)
+        loadBackup() # always load db backup before running
+        subprocess.call([util_script, 'clean-heap'])
+        runDBBench(setups[setup])
+        plot(setup, setups[setup]['profiling_results_dir'])

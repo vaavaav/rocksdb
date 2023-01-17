@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "cache/sharded_cache.h"
+#include "cache/thesis_profiling.h"
 
 #include "db/dbformat.h"
 #include "db/pinned_iterators_manager.h"
@@ -432,16 +433,17 @@ void BlockBasedTable::UpdateCacheInsertionMetrics(BlockType block_type,
 Cache::Handle* BlockBasedTable::GetEntryFromCache(
     Cache* block_cache, const Slice& key, BlockType block_type,
     GetContext* get_context) const {
-  auto cache_handle = block_cache->Lookup(key, rep_->ioptions.statistics);
-
-  if (cache_handle != nullptr) {
-    UpdateCacheHitMetrics(block_type, get_context,
-                          block_cache->GetUsage(cache_handle));
-  } else {
-    UpdateCacheMissMetrics(block_type, get_context);
-  }
-
-  return cache_handle;
+      if(!ThesisProfiling::getInstance().isReject()) {
+        auto cache_handle = block_cache->Lookup(key, rep_->ioptions.statistics);
+        if (cache_handle != nullptr) {
+          UpdateCacheHitMetrics(block_type, get_context,
+                                block_cache->GetUsage(cache_handle));
+        } else {
+          UpdateCacheMissMetrics(block_type, get_context);
+        }
+        return cache_handle;
+      }
+      return nullptr;
 }
 
 // Helper function to setup the cache key's prefix for the Table.
@@ -1210,10 +1212,11 @@ Status BlockBasedTable::GetDataBlockFromCache(
   }
 
   assert(!compressed_block_cache_key.empty());
-  block_cache_compressed_handle =
-      block_cache_compressed->Lookup(compressed_block_cache_key);
-
   Statistics* statistics = rep_->ioptions.statistics;
+  if(!ThesisProfiling::getInstance().isReject()) {
+    block_cache_compressed_handle =
+        block_cache_compressed->Lookup(compressed_block_cache_key);
+  }
 
   // if we found in the compressed cache, then uncompress and insert into
   // uncompressed cache
@@ -3032,12 +3035,13 @@ bool BlockBasedTable::TEST_BlockInCache(const BlockHandle& handle) const {
       GetCacheKey(rep_->cache_key_prefix, rep_->cache_key_prefix_size, handle,
                   cache_key_storage);
 
-  Cache::Handle* const cache_handle = cache->Lookup(cache_key);
-  if (cache_handle == nullptr) {
-    return false;
+  if(!ThesisProfiling::getInstance().isReject()){
+    Cache::Handle* const cache_handle = cache->Lookup(cache_key);
+    if (cache_handle == nullptr) {
+      return false;
+    }
+    cache->Release(cache_handle);
   }
-
-  cache->Release(cache_handle);
 
   return true;
 }
